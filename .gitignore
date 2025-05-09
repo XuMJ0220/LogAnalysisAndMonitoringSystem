@@ -1,32 +1,54 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
+# 编译生成的文件
+build/
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
 *.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
-*.lib
-
-# Executables
+*.dll
+*.dylib
 *.exe
-*.out
-*.app
+
+# CMake生成的文件
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# IDE相关文件
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+tmp/
+
+# 依赖库
+/vendor/
+/third_party/
+
+# 测试生成的文件
+/tests/output/
+
+# 环境变量文件
+.env
+.env.local
+
+# 可能包含敏感信息的配置文件
+config/secrets.json
+
+# 缓存文件
+.cache/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 个人文件
+简历项目介绍.md 

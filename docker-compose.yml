@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # Redis缓存服务
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - log_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+
+  # MySQL数据库服务
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: logdb
+      MYSQL_USER: loguser
+      MYSQL_PASSWORD: logpass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: always
+    networks:
+      - log_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+
+  # 日志服务
+  log-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: log-service:latest
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=loguser
+      - MYSQL_PASS=logpass
+      - MYSQL_DB=logdb
+    command: /app/bin/log_service
+    restart: always
+    networks:
+      - log_network
+
+  # 告警服务
+  alert-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: log-service:latest
+    ports:
+      - "50052:50051"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=loguser
+      - MYSQL_PASS=logpass
+      - MYSQL_DB=logdb
+    command: /app/bin/alert_service
+    restart: always
+    networks:
+      - log_network
+
+  # API网关
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - log-service
+      - alert-service
+    environment:
+      - LOG_SERVICE_HOST=log-service
+      - LOG_SERVICE_PORT=50051
+      - ALERT_SERVICE_HOST=alert-service
+      - ALERT_SERVICE_PORT=50051
+    restart: always
+    networks:
+      - log_network
+
+networks:
+  log_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  mysql_data: 

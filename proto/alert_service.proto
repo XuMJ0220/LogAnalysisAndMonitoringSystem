@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+package xumj.proto;
+
+option java_multiple_files = true;
+option java_package = "com.xumj.proto";
+option java_outer_classname = "AlertServiceProto";
+
+// 告警服务定义
+service AlertService {
+  // 获取告警列表
+  rpc GetAlerts (AlertQuery) returns (AlertQueryResponse) {}
+  
+  // 获取告警详情
+  rpc GetAlertDetail (AlertDetailRequest) returns (Alert) {}
+  
+  // 更新告警状态
+  rpc UpdateAlertStatus (UpdateAlertStatusRequest) returns (UpdateAlertStatusResponse) {}
+  
+  // 创建告警规则
+  rpc CreateAlertRule (AlertRule) returns (CreateAlertRuleResponse) {}
+  
+  // 更新告警规则
+  rpc UpdateAlertRule (AlertRule) returns (UpdateAlertRuleResponse) {}
+  
+  // 删除告警规则
+  rpc DeleteAlertRule (DeleteAlertRuleRequest) returns (DeleteAlertRuleResponse) {}
+  
+  // 获取告警规则列表
+  rpc GetAlertRules (AlertRuleQuery) returns (AlertRuleQueryResponse) {}
+  
+  // 订阅告警
+  rpc SubscribeAlerts (SubscribeAlertsRequest) returns (stream Alert) {}
+}
+
+// 告警级别
+enum AlertLevel {
+  INFO = 0;
+  WARNING = 1;
+  ERROR = 2;
+  CRITICAL = 3;
+}
+
+// 告警状态
+enum AlertStatus {
+  PENDING = 0;
+  ACTIVE = 1;
+  RESOLVED = 2;
+  IGNORED = 3;
+}
+
+// 告警对象
+message Alert {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  AlertLevel level = 4;
+  AlertStatus status = 5;
+  string source = 6;
+  string timestamp = 7;
+  string update_time = 8;
+  map<string, string> labels = 9;
+  map<string, string> annotations = 10;
+  repeated string related_log_ids = 11;
+  int32 count = 12;
+  string resolution_comment = 13;
+}
+
+// 告警查询请求
+message AlertQuery {
+  string start_time = 1;
+  string end_time = 2;
+  repeated AlertLevel levels = 3;
+  repeated AlertStatus statuses = 4;
+  repeated string sources = 5;
+  string name_pattern = 6;
+  map<string, string> label_filters = 7;
+  int32 limit = 8;
+  int32 offset = 9;
+  string sort_field = 10;
+  bool ascending = 11;
+}
+
+// 告警查询响应
+message AlertQueryResponse {
+  bool success = 1;
+  string message = 2;
+  repeated Alert alerts = 3;
+  int32 total_count = 4;
+  bool has_more = 5;
+}
+
+// 告警详情请求
+message AlertDetailRequest {
+  string alert_id = 1;
+}
+
+// 更新告警状态请求
+message UpdateAlertStatusRequest {
+  string alert_id = 1;
+  AlertStatus status = 2;
+  string comment = 3;
+}
+
+// 更新告警状态响应
+message UpdateAlertStatusResponse {
+  bool success = 1;
+  string message = 2;
+  Alert updated_alert = 3;
+}
+
+// 告警规则类型
+enum AlertRuleType {
+  THRESHOLD = 0;
+  KEYWORD = 1;
+  ANOMALY = 2;
+  COMPOSITE = 3;
+}
+
+// 告警规则
+message AlertRule {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  AlertRuleType type = 4;
+  AlertLevel level = 5;
+  bool enabled = 6;
+  
+  // 阈值规则特定字段
+  ThresholdRuleConfig threshold_config = 7;
+  
+  // 关键字规则特定字段
+  KeywordRuleConfig keyword_config = 8;
+  
+  // 组合规则特定字段
+  CompositeRuleConfig composite_config = 9;
+  
+  // 标签和注解
+  map<string, string> labels = 10;
+  map<string, string> annotations = 11;
+}
+
+// 阈值规则配置
+message ThresholdRuleConfig {
+  string field = 1;
+  double threshold = 2;
+  string compare_type = 3; // >, <, >=, <=, ==, !=
+}
+
+// 关键字规则配置
+message KeywordRuleConfig {
+  string field = 1;
+  repeated string keywords = 2;
+  bool match_all = 3;
+  bool case_sensitive = 4;
+}
+
+// 组合规则配置
+message CompositeRuleConfig {
+  repeated string rule_ids = 1;
+  string operator = 2; // AND, OR
+  int32 min_match_count = 3;
+}
+
+// 创建告警规则响应
+message CreateAlertRuleResponse {
+  bool success = 1;
+  string message = 2;
+  string rule_id = 3;
+}
+
+// 更新告警规则响应
+message UpdateAlertRuleResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// 删除告警规则请求
+message DeleteAlertRuleRequest {
+  string rule_id = 1;
+}
+
+// 删除告警规则响应
+message DeleteAlertRuleResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// 告警规则查询
+message AlertRuleQuery {
+  repeated AlertRuleType types = 1;
+  repeated AlertLevel levels = 2;
+  bool include_disabled = 3;
+  string name_pattern = 4;
+  map<string, string> label_filters = 5;
+  int32 limit = 6;
+  int32 offset = 7;
+}
+
+// 告警规则查询响应
+message AlertRuleQueryResponse {
+  bool success = 1;
+  string message = 2;
+  repeated AlertRule rules = 3;
+  int32 total_count = 4;
+  bool has_more = 5;
+}
+
+// 订阅告警请求
+message SubscribeAlertsRequest {
+  string client_id = 1;
+  repeated AlertLevel levels = 2;
+  repeated string sources = 3;
+  map<string, string> label_filters = 4;
+  bool include_resolved = 5;
+} 

@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package xumj.proto;
+
+option java_multiple_files = true;
+option java_package = "com.xumj.proto";
+option java_outer_classname = "LogServiceProto";
+
+// 日志服务定义
+service LogService {
+  // 提交日志
+  rpc SubmitLogs (LogBatch) returns (SubmitResponse) {}
+  
+  // 查询日志
+  rpc QueryLogs (LogQuery) returns (LogQueryResponse) {}
+  
+  // 获取统计信息
+  rpc GetStats (StatsRequest) returns (StatsResponse) {}
+  
+  // 订阅日志流
+  rpc SubscribeLogs (SubscribeRequest) returns (stream LogEntry) {}
+}
+
+// 单条日志记录
+message LogEntry {
+  string id = 1;
+  string timestamp = 2;
+  string log_level = 3;
+  string source = 4;
+  string message = 5;
+  map<string, string> fields = 6;
+  bytes raw_data = 7;
+  bool compressed = 8;
+}
+
+// 批量日志提交
+message LogBatch {
+  string client_id = 1;
+  repeated LogEntry logs = 2;
+  string batch_id = 3;
+  bool require_ack = 4;
+}
+
+// 提交响应
+message SubmitResponse {
+  bool success = 1;
+  string message = 2;
+  string batch_id = 3;
+  int32 accepted_count = 4;
+  int32 rejected_count = 5;
+  repeated string rejected_ids = 6;
+}
+
+// 日志查询请求
+message LogQuery {
+  string start_time = 1;
+  string end_time = 2;
+  repeated string log_levels = 3;
+  repeated string sources = 4;
+  string message_pattern = 5;
+  map<string, string> field_filters = 6;
+  int32 limit = 7;
+  int32 offset = 8;
+  string sort_field = 9;
+  bool ascending = 10;
+}
+
+// 日志查询响应
+message LogQueryResponse {
+  bool success = 1;
+  string message = 2;
+  repeated LogEntry logs = 3;
+  int32 total_count = 4;
+  bool has_more = 5;
+}
+
+// 统计请求
+message StatsRequest {
+  string start_time = 1;
+  string end_time = 2;
+  repeated string group_by = 3;
+  repeated string metrics = 4;
+}
+
+// 统计响应
+message StatsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated StatGroup stats = 3;
+}
+
+// 统计组
+message StatGroup {
+  map<string, string> dimensions = 1;
+  map<string, double> metrics = 2;
+}
+
+// 订阅请求
+message SubscribeRequest {
+  string client_id = 1;
+  repeated string log_levels = 2;
+  repeated string sources = 3;
+  string message_pattern = 4;
+  map<string, string> field_filters = 5;
+  bool include_historical = 6;
+} 
