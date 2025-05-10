@@ -30,7 +30,7 @@ void TestRedisStorage() {
     RedisConfig config;
     config.host = "127.0.0.1";
     config.port = 6379;
-    config.password = "";
+    config.password = "123465"; // 使用我们设置的密码
     config.database = 0;
     
     try {
@@ -130,7 +130,7 @@ void TestMySQLStorage() {
     config.port = 3306;
     config.username = "root";
     config.password = "ytfhqqkso1";  // 使用正确的密码
-    config.database = "mydatabase1";  // 使用已存在的数据库
+    config.database = "log_analysis";  // 使用我们创建的数据库
     
     try {
         // 创建MySQL存储

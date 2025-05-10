@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include "xumj/storage/redis_storage.h"
 #include "xumj/storage/mysql_storage.h"
 
@@ -24,6 +25,40 @@ enum class StorageType {
  */
 class StorageFactory {
 public:
+    /**
+     * @brief 构造函数
+     */
+    StorageFactory() = default;
+
+    /**
+     * @brief 注册存储实例
+     * @param name 存储名称
+     * @param storage 存储实例
+     * @return 是否成功注册
+     */
+    template<typename T>
+    bool RegisterStorage(const std::string& name, std::shared_ptr<T> storage) {
+        if (storages_.find(name) != storages_.end()) {
+            return false; // 已存在同名存储
+        }
+        storages_[name] = std::static_pointer_cast<void>(storage);
+        return true;
+    }
+
+    /**
+     * @brief 获取存储实例
+     * @param name 存储名称
+     * @return 存储实例（需要转换为具体类型）
+     */
+    template<typename T>
+    std::shared_ptr<T> GetStorage(const std::string& name) {
+        auto it = storages_.find(name);
+        if (it == storages_.end()) {
+            return nullptr;
+        }
+        return std::static_pointer_cast<T>(it->second);
+    }
+
     /**
      * @brief 创建Redis存储实例
      * @param config Redis配置
@@ -63,6 +98,9 @@ public:
      * @return MySQL配置
      */
     static MySQLConfig CreateMySQLConfigFromJson(const std::string& configJson);
+
+private:
+    std::unordered_map<std::string, std::shared_ptr<void>> storages_; ///< 存储实例映射
 };
 
 } // namespace storage

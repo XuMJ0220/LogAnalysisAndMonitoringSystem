@@ -97,20 +97,20 @@ std::shared_ptr<StorageFactory> setupStorage() {
     RedisConfig redisConfig;
     redisConfig.host = "127.0.0.1";
     redisConfig.port = 6379;
-    redisConfig.password = "";
+    redisConfig.password = "123465";  // 使用我们设置的密码
     redisConfig.database = 0;
     // 创建MySQL存储配置
     MySQLConfig mysqlConfig;
     mysqlConfig.host = "127.0.0.1";
     mysqlConfig.port = 3306;
-    mysqlConfig.username = "loguser";
-    mysqlConfig.password = "logpassword";
+    mysqlConfig.username = "root";  // 修改 user 为 username
+    mysqlConfig.password = "ytfhqqkso1";
     mysqlConfig.database = "log_analysis";
     // 初始化存储工厂
     auto storageFactory = std::make_shared<StorageFactory>();
-    // 注册存储实现（如无RegisterStorage方法可注释）
-    // storageFactory->RegisterStorage("redis", std::make_shared<RedisStorage>(redisConfig));
-    // storageFactory->RegisterStorage("mysql", std::make_shared<MySQLStorage>(mysqlConfig));
+    // 注册存储实现
+    storageFactory->RegisterStorage("redis", std::make_shared<RedisStorage>(redisConfig));
+    storageFactory->RegisterStorage("mysql", std::make_shared<MySQLStorage>(mysqlConfig));
     std::cout << "存储管理器配置完成" << std::endl;
     return storageFactory;
 }
