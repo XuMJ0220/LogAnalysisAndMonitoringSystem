@@ -206,4 +206,48 @@ target_link_libraries(complete_system_example
     pthread
 )
 
+# TCP服务器测试
+add_executable(test_tcp_server
+    test_tcp_server.cpp
+)
+
+# 设置编译选项
+target_compile_options(test_tcp_server PRIVATE -Wall -Wextra)
+
+# 添加包含目录
+target_include_directories(test_tcp_server PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+
+# 链接依赖库
+target_link_libraries(test_tcp_server
+    network
+    common
+    muduo_net
+    muduo_base
+    pthread
+)
+
+# TCP客户端测试
+add_executable(test_tcp_client
+    test_tcp_client.cpp
+)
+
+# 设置编译选项
+target_compile_options(test_tcp_client PRIVATE -Wall -Wextra)
+
+# 添加包含目录
+target_include_directories(test_tcp_client PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+
+# 链接依赖库
+target_link_libraries(test_tcp_client
+    network
+    common
+    muduo_net
+    muduo_base
+    pthread
+)
+
 # 如果有其他示例，可以在这里添加 

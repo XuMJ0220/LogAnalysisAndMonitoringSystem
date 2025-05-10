@@ -103,6 +103,7 @@ include_directories(
 add_subdirectory(src)
 add_subdirectory(examples)
 add_subdirectory(tests)
+add_subdirectory(tools)  # 添加tools目录
 
 # 安装规则
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/

@@ -162,7 +162,16 @@ void TcpServer::HandleConnection(const TcpConnectionPtr& conn, bool connected) {
         
         // 调用用户回调
         if (connectionCallback_) {
+            std::cout << "===== 新TCP连接 =====" << std::endl;
+            std::cout << "- 服务器: " << serverName_ << std::endl;
+            std::cout << "- 连接ID: " << connectionId << std::endl;
+            std::cout << "- 客户端: " << clientAddr << std::endl;
+            std::cout << "- 当前连接数: " << GetConnectionCount() << std::endl;
+            std::cout << "===================" << std::endl;
+            
             connectionCallback_(connectionId, clientAddr, true);
+        } else {
+            std::cerr << "警告: 未设置连接回调函数，无法通知新连接" << std::endl;
         }
         
         std::cout << "New connection [" << connectionId << "] from " 
@@ -181,7 +190,15 @@ void TcpServer::HandleConnection(const TcpConnectionPtr& conn, bool connected) {
         
         // 调用用户回调
         if (connectionCallback_) {
+            std::cout << "===== TCP连接断开 =====" << std::endl;
+            std::cout << "- 服务器: " << serverName_ << std::endl;
+            std::cout << "- 连接ID: " << connectionId << std::endl;
+            std::cout << "- 客户端: " << clientAddr << std::endl;
+            std::cout << "======================" << std::endl;
+            
             connectionCallback_(connectionId, clientAddr, false);
+        } else {
+            std::cerr << "警告: 未设置连接回调函数，无法通知连接断开" << std::endl;
         }
         
         // 注销连接
@@ -207,9 +224,22 @@ void TcpServer::HandleMessage(const TcpConnectionPtr& conn,
     // 获取消息内容
     std::string message = buffer->retrieveAllAsString();
     
+    // 添加详细日志
+    std::cout << "===== TCP服务器收到消息 =====" << std::endl;
+    std::cout << "- 服务器: " << serverName_ << std::endl;
+    std::cout << "- 连接ID: " << connectionId << std::endl;
+    std::cout << "- 客户端: " << conn->peerAddress().toIpPort() << std::endl;
+    std::cout << "- 消息大小: " << message.size() << " 字节" << std::endl;
+    std::cout << "- 时间戳: " << timestamp.toString() << std::endl;
+    std::cout << "- 消息预览: " << (message.size() > 50 ? message.substr(0, 50) + "..." : message) << std::endl;
+    std::cout << "==========================" << std::endl;
+    
     // 调用用户回调
     if (messageCallback_) {
+        std::cout << "调用用户消息回调..." << std::endl;
         messageCallback_(connectionId, message, timestamp);
+    } else {
+        std::cerr << "警告: TCP服务器没有设置消息回调函数，消息将被丢弃" << std::endl;
     }
 }
 

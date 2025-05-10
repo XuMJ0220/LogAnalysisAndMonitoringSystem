@@ -256,6 +256,20 @@ public:
      */
     std::shared_ptr<analyzer::LogAnalyzer> GetAnalyzer();
     
+    /**
+     * @brief 初始化TCP服务器进行网络日志接收
+     * @return 是否成功初始化
+     */
+    bool InitializeTcpServer();
+    
+    /**
+     * @brief 获取TCP服务器实例
+     * @return TCP服务器实例
+     */
+    const std::unique_ptr<network::TcpServer>& GetTcpServer() const {
+        return tcpServer_;
+    }
+    
 private:
     // 处理线程函数
     void ProcessThreadFunc();
@@ -271,9 +285,6 @@ private:
     
     // 解压日志数据（如果已压缩）
     std::string DecompressLogData(const LogData& data);
-    
-    // 初始化TCP服务器进行网络日志接收
-    bool InitializeTcpServer();
     
     // TCP消息处理回调
     void HandleTcpMessage(uint64_t connectionId, const std::string& message, muduo::Timestamp timestamp);

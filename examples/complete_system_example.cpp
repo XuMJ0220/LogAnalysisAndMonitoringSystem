@@ -6,6 +6,9 @@
 #include <atomic>
 #include <vector>
 #include <csignal>
+#include <unordered_map>
+#include <future>
+#include <sstream>
 
 #include "xumj/collector/log_collector.h"
 #include "xumj/processor/log_processor.h"
@@ -66,13 +69,38 @@ std::shared_ptr<LogCollector> setupLogCollector() {
 // 创建并配置日志处理器
 std::shared_ptr<LogProcessor> setupLogProcessor() {
     // 创建日志处理器配置
-    // 这里假设LogProcessor支持默认构造
-    auto processor = std::make_shared<LogProcessor>();
+    ProcessorConfig config;
     
-    // 添加日志解析器（后续补充stub）
-    // processor->AddParser("JSON", std::make_shared<JsonLogParser>());
-    // processor->AddParser("Syslog", std::make_shared<SyslogParser>());
-    // processor->AddParser("Apache", std::make_shared<ApacheLogParser>());
+    // 配置MySQL连接
+    std::stringstream mysqlConfigJson;
+    mysqlConfigJson << "{"
+                    << "\"host\": \"127.0.0.1\","
+                    << "\"port\": 3306,"
+                    << "\"username\": \"root\","
+                    << "\"password\": \"ytfhqqkso1\","
+                    << "\"database\": \"log_analysis\""
+                    << "}";
+    config.mysqlConfigJson = mysqlConfigJson.str();
+    
+    // 创建处理器实例
+    auto processor = std::make_shared<LogProcessor>(config);
+    
+    // 添加JSON日志解析器
+    std::unordered_map<std::string, std::string> fieldMapping = {
+        {"timestamp", "timestamp"},
+        {"level", "level"},
+        {"message", "message"},
+        {"type", "type"},
+        {"source", "source"}
+    };
+    processor->AddParser(std::make_shared<JsonLogParser>("JSONParser", fieldMapping));
+    
+    // 启动处理器 - 这会自动初始化TCP服务器
+    bool success = processor->Start();
+    if (!success) {
+        std::cerr << "启动日志处理器失败" << std::endl;
+        return nullptr;
+    }
     
     std::cout << "日志处理器配置完成" << std::endl;
     return processor;
@@ -99,6 +127,8 @@ std::shared_ptr<StorageFactory> setupStorage() {
     redisConfig.port = 6379;
     redisConfig.password = "123465";  // 使用我们设置的密码
     redisConfig.database = 0;
+    redisConfig.timeout = 10000;  // 增加超时时间到10秒
+
     // 创建MySQL存储配置
     MySQLConfig mysqlConfig;
     mysqlConfig.host = "127.0.0.1";
@@ -106,11 +136,30 @@ std::shared_ptr<StorageFactory> setupStorage() {
     mysqlConfig.username = "root";  // 修改 user 为 username
     mysqlConfig.password = "ytfhqqkso1";
     mysqlConfig.database = "log_analysis";
+
     // 初始化存储工厂
     auto storageFactory = std::make_shared<StorageFactory>();
-    // 注册存储实现
-    storageFactory->RegisterStorage("redis", std::make_shared<RedisStorage>(redisConfig));
-    storageFactory->RegisterStorage("mysql", std::make_shared<MySQLStorage>(mysqlConfig));
+    
+    // 尝试注册Redis存储实现
+    try {
+        std::cout << "正在连接Redis服务器: " << redisConfig.host << ":" << redisConfig.port << "..." << std::endl;
+        storageFactory->RegisterStorage("redis", std::make_shared<RedisStorage>(redisConfig));
+        std::cout << "Redis连接成功!" << std::endl;
+    } catch (const RedisStorageException& e) {
+        std::cerr << "Redis连接错误: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Redis连接时发生未知错误: " << e.what() << std::endl;
+    }
+    
+    // 尝试注册MySQL存储实现
+    try {
+        std::cout << "正在连接MySQL服务器: " << mysqlConfig.host << ":" << mysqlConfig.port << "..." << std::endl;
+        storageFactory->RegisterStorage("mysql", std::make_shared<MySQLStorage>(mysqlConfig));
+        std::cout << "MySQL连接成功!" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "MySQL连接错误: " << e.what() << std::endl;
+    }
+    
     std::cout << "存储管理器配置完成" << std::endl;
     return storageFactory;
 }
@@ -124,50 +173,41 @@ std::shared_ptr<AlertManager> setupAlertManager() {
 }
 
 // 创建并配置TCP服务器
-std::shared_ptr<TcpServer> setupServer(
+void setupServer(
     std::shared_ptr<LogProcessor> processor,
-    std::shared_ptr<LogAnalyzer> analyzer,
-    std::shared_ptr<AlertManager> alertManager) {
+    std::shared_ptr<LogAnalyzer> /* analyzer */,
+    std::shared_ptr<AlertManager> /* alertManager */) {
 
-    // 创建TCP服务器
-    auto server = std::make_shared<TcpServer>("LogServer", "0.0.0.0", 8000, 4);
+    // 我们不再在这里创建新的TCP服务器，而是复用LogProcessor中创建的服务器
+    std::cout << "TCP服务器已在LogProcessor中初始化" << std::endl;
     
-    // 设置连接回调
-    server->SetConnectionCallback([](uint64_t connectionId, const std::string& clientAddr, bool connected) {
-        if (connected) {
-            std::cout << "新客户端连接: " << clientAddr << ", ID: " << connectionId << std::endl;
-        } else {
-            std::cout << "客户端断开连接: " << clientAddr << ", ID: " << connectionId << std::endl;
-        }
-    });
-    
-    // 设置消息回调，将接收的日志数据放入处理器
-    server->SetMessageCallback([processor, analyzer, alertManager](
-        uint64_t connectionId, 
-        const std::string& message,
-        muduo::Timestamp timestamp) {
+    // 获取LogProcessor中的TCP服务器，并设置回调用于调试
+    const auto& tcpServer = processor->GetTcpServer();
+    if (tcpServer) {
+        // 设置额外的回调以便于调试
+        tcpServer->SetConnectionCallback([](uint64_t connectionId, const std::string& clientAddr, bool connected) {
+            if (connected) {
+                std::cout << "[DEBUG] 新连接建立: ID=" << connectionId << ", 客户端=" << clientAddr << std::endl;
+            } else {
+                std::cout << "[DEBUG] 连接断开: ID=" << connectionId << ", 客户端=" << clientAddr << std::endl;
+            }
+        });
         
-        std::cout << "接收到消息，长度: " << message.size() << " 字节" << std::endl;
-        
-        // 创建日志数据
-        LogData logData;
-        logData.id = "log-" + std::to_string(connectionId) + "-" + std::to_string(timestamp.microSecondsSinceEpoch());
-        logData.data = message;
-        logData.source = "client-" + std::to_string(connectionId);
-        logData.timestamp = std::chrono::system_clock::now();
-        
-        // 处理日志
-        processor->SubmitLogData(logData);
-    });
-    
-    std::cout << "TCP服务器配置完成" << std::endl;
-    return server;
+        tcpServer->SetMessageCallback([](uint64_t connectionId, const std::string& message, muduo::Timestamp) {
+            std::cout << "[DEBUG] 收到消息: 连接ID=" << connectionId 
+                      << ", 长度=" << message.size() 
+                      << ", 预览=" << (message.size() > 30 ? message.substr(0, 30) + "..." : message)
+                      << std::endl;
+        });
+    } else {
+        std::cerr << "警告: LogProcessor中没有初始化TCP服务器" << std::endl;
+    }
 }
 
 // 示例客户端，用于生成和发送日志
 void runClient() {
     // 创建TCP客户端
-    TcpClient client("LogClient", "127.0.0.1", 8000, true);
+    TcpClient client("LogClient", "127.0.0.1", 8001, true);
     
     // 设置连接回调
     client.SetConnectionCallback([](bool connected) {
@@ -186,12 +226,27 @@ void runClient() {
     // 连接服务器
     client.Connect();
     
-    // 等待连接建立
+    // 等待连接建立，但不要等待过长时间
     std::this_thread::sleep_for(std::chrono::seconds(1));
+    
+    // 检查是否已连接，如果未连接则不发送日志
+    if (!client.IsConnected()) {
+        std::cerr << "无法连接到服务器，客户端退出" << std::endl;
+        return;
+    }
     
     // 生成并发送示例日志
     int index = 0;
+    auto startTime = std::chrono::steady_clock::now();
+    
     while (running && index < 20) {
+        // 检查是否超时（10秒内未完成则退出）
+        auto currentTime = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count() > 10) {
+            std::cerr << "客户端发送日志超时，已发送 " << index << " 条" << std::endl;
+            break;
+        }
+        
         // 生成不同类型的示例日志
         std::string logMessage;
         
@@ -268,13 +323,33 @@ int main() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     
+    // 设置总体运行超时（60秒后自动退出）
+    std::thread timeoutThread([]() {
+        std::this_thread::sleep_for(std::chrono::seconds(60));
+        std::cout << "程序运行超时（60秒），准备退出..." << std::endl;
+        running = false;
+    });
+    timeoutThread.detach();  // 分离线程以允许后台运行
+    
     try {
         // 初始化各个组件
         auto logCollector = setupLogCollector();
-        auto logProcessor = setupLogProcessor();
-        auto logAnalyzer = setupLogAnalyzer();
+        if (!logCollector) {
+            std::cerr << "初始化日志收集器失败" << std::endl;
+            return 1;
+        }
+        
         auto storageFactory = setupStorage();
+        if (!storageFactory) {
+            std::cerr << "初始化存储失败" << std::endl;
+            return 1;
+        }
+        
         auto alertManager = setupAlertManager();
+        if (!alertManager) {
+            std::cerr << "初始化告警管理器失败" << std::endl;
+            return 1;
+        }
         
         // 启动告警管理器
         if (!alertManager->Start()) {
@@ -282,29 +357,61 @@ int main() {
             return 1;
         }
         
-        // 设置并启动TCP服务器
-        auto server = setupServer(logProcessor, logAnalyzer, alertManager);
+        auto logAnalyzer = setupLogAnalyzer();
+        if (!logAnalyzer) {
+            std::cerr << "初始化日志分析器失败" << std::endl;
+            return 1;
+        }
         
-        server->Start();
-        std::cout << "TCP服务器已启动，监听端口: 8000" << std::endl;
+        // 创建处理器（必须在创建分析器和存储之后）
+        auto logProcessor = setupLogProcessor();
+        if (!logProcessor) {
+            std::cerr << "初始化日志处理器失败" << std::endl;
+            return 1;
+        }
+        
+        // 只需调用一次setupServer，但我们不使用它返回的服务器
+        setupServer(logProcessor, logAnalyzer, alertManager);
+        
+        std::cout << "TCP服务器已启动，监听端口: 8001" << std::endl;
         
         // 启动客户端线程
         std::thread clientThread(runClient);
         
-        // 主循环
+        // 设置一个短暂的等待时间，允许客户端初始化
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        
+        // 主循环，最多运行30秒
         std::cout << "系统已启动，按Ctrl+C停止..." << std::endl;
+        auto startTime = std::chrono::steady_clock::now();
+        
         while (running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            
+            // 检查是否运行超过30秒
+            auto currentTime = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count() > 30) {
+                std::cout << "运行时间达到30秒，系统将自动退出..." << std::endl;
+                running = false;
+            }
+            
+            // 输出系统还活着的标志
+            std::cout << "." << std::flush;
         }
         
-        // 等待客户端线程结束
+        // 等待客户端线程结束，但设置超时
         if (clientThread.joinable()) {
-            clientThread.join();
+            // 给客户端线程5秒时间来完成
+            auto clientRunning = std::async(std::launch::async, [&clientThread]() {
+                clientThread.join();
+                return true;
+            });
+            
+            // 如果5秒内没有结束，继续执行
+            if (clientRunning.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+                std::cerr << "客户端线程未能在超时时间内结束" << std::endl;
+            }
         }
-        
-        // 停止服务器
-        server->Stop();
-        std::cout << "TCP服务器已停止" << std::endl;
         
         // 停止告警管理器
         alertManager->Stop();

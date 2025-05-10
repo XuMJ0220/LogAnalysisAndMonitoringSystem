@@ -445,6 +445,16 @@ bool LogProcessor::Start() {
         return true;  // 已经在运行
     }
     
+    // 初始化TCP服务器
+    if (!tcpServer_) {
+        bool success = InitializeTcpServer();
+        if (!success) {
+            std::cerr << "初始化TCP服务器失败，日志处理器启动失败" << std::endl;
+            return false;
+        }
+        std::cout << "TCP服务器初始化成功" << std::endl;
+    }
+    
     // 启动分析器
     if (analyzer_) {
         analyzer_->Start();
@@ -610,6 +620,12 @@ analyzer::LogRecord LogProcessor::ParseLogData(const LogData& data) {
 }
 
 void LogProcessor::ArchiveLogData(const LogData& data, const analyzer::LogRecord& record) {
+    // 添加调试信息
+    std::cout << "开始存档日志数据，ID: " << data.id 
+              << "，源: " << data.source 
+              << "，级别: " << record.level
+              << std::endl;
+    
     // 存储原始日志数据（可选）
     if (redisStorage_) {
         try {
@@ -640,6 +656,7 @@ void LogProcessor::ArchiveLogData(const LogData& data, const analyzer::LogRecord
             redisStorage_->Expire(key, 86400 * 7);  // 7天
             redisStorage_->Expire(key + ":info", 86400 * 7);  // 7天
             
+            std::cout << "原始日志成功存储到Redis，键: " << key << std::endl;
         } catch (const storage::RedisStorageException& e) {
             std::cerr << "存储原始日志到Redis失败: " << e.what() << std::endl;
         }
@@ -661,12 +678,29 @@ void LogProcessor::ArchiveLogData(const LogData& data, const analyzer::LogRecord
                 entry.fields[fieldKey] = fieldValue;
             }
             
+            std::cout << "准备存储日志到MySQL，ID: " << entry.id 
+                      << "，时间戳: " << entry.timestamp 
+                      << "，源: " << entry.source 
+                      << "，级别: " << entry.level 
+                      << "，消息长度: " << entry.message.size() 
+                      << "，字段数: " << entry.fields.size() 
+                      << std::endl;
+            
             // 保存到MySQL
-            mysqlStorage_->SaveLogEntry(entry);
+            bool success = mysqlStorage_->SaveLogEntry(entry);
+            if (success) {
+                std::cout << "日志成功存储到MySQL，ID: " << entry.id << std::endl;
+            } else {
+                std::cerr << "存储日志到MySQL失败，ID: " << entry.id << std::endl;
+            }
             
         } catch (const storage::MySQLStorageException& e) {
             std::cerr << "存储日志到MySQL失败: " << e.what() << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "存储日志到MySQL时发生未知错误: " << e.what() << std::endl;
         }
+    } else {
+        std::cerr << "无法存储日志到MySQL：MySQLStorage未初始化" << std::endl;
     }
 }
 
@@ -686,7 +720,7 @@ std::string LogProcessor::DecompressLogData(const LogData& data) {
 bool LogProcessor::InitializeTcpServer() {
     try {
         // 创建TCP服务器，监听特定端口
-        tcpServer_ = std::make_unique<network::TcpServer>("LogServer", "0.0.0.0", 9000, 4);
+        tcpServer_ = std::make_unique<network::TcpServer>("LogServer", "0.0.0.0", 8001, 4);
         
         // 设置消息回调
         tcpServer_->SetMessageCallback(std::bind(&LogProcessor::HandleTcpMessage, this, 
@@ -709,7 +743,53 @@ bool LogProcessor::InitializeTcpServer() {
     }
 }
 
+void LogProcessor::HandleTcpConnection(uint64_t connectionId, const std::string& clientAddr, bool connected) {
+    std::cout << "\n========== TCP 连接事件 ==========" << std::endl;
+    std::cout << "连接ID: " << connectionId << std::endl;
+    std::cout << "客户端地址: " << clientAddr << std::endl;
+    std::cout << "状态: " << (connected ? "已连接" : "已断开") << std::endl;
+    std::cout << "=================================\n" << std::endl;
+    
+    if (connected) {
+        // 新连接
+        std::lock_guard<std::mutex> lock(connectionsMutex_);
+        connections_[connectionId] = clientAddr;
+    } else {
+        // 连接断开
+        std::lock_guard<std::mutex> lock(connectionsMutex_);
+        connections_.erase(connectionId);
+    }
+}
+
 void LogProcessor::HandleTcpMessage(uint64_t connectionId, const std::string& message, muduo::Timestamp /* timestamp */) {
+    // 添加调试输出
+    std::cout << "\n========== TCP 消息接收 ==========" << std::endl;
+    std::cout << "连接ID: " << connectionId << std::endl;
+    std::cout << "消息长度: " << message.size() << " 字节" << std::endl;
+    std::cout << "消息预览: " << (message.size() > 100 ? message.substr(0, 100) + "..." : message) << std::endl;
+    std::cout << "=================================\n" << std::endl;
+              
+    // 检查消息是否为空
+    if (message.empty()) {
+        std::cerr << "收到空消息，忽略" << std::endl;
+        return;
+    }
+    
+    try {
+        // 检查消息是不是有效的JSON
+        nlohmann::json j = nlohmann::json::parse(message);
+        std::cout << "消息解析为有效的JSON" << std::endl;
+        
+        // 打印JSON的核心字段
+        if (j.contains("timestamp")) std::cout << "时间戳: " << j["timestamp"].get<std::string>() << std::endl;
+        if (j.contains("level")) std::cout << "级别: " << j["level"].get<std::string>() << std::endl;
+        if (j.contains("type")) std::cout << "类型: " << j["type"].get<std::string>() << std::endl;
+        if (j.contains("message")) std::cout << "消息: " << j["message"].get<std::string>() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "消息不是有效的JSON: " << e.what() << std::endl;
+        // 继续处理，因为可能是其他格式的日志
+    }
+    
     // 创建日志数据
     LogData data;
     data.id = "tcp-" + std::to_string(connectionId) + "-" + std::to_string(dataCount_++);
@@ -727,20 +807,46 @@ void LogProcessor::HandleTcpMessage(uint64_t connectionId, const std::string& me
         }
     }
     
+    std::cout << "准备提交日志数据，ID: " << data.id 
+              << "，源: " << data.source 
+              << "，数据长度: " << data.data.size() 
+              << std::endl;
+    
     // 提交日志数据进行处理
-    SubmitLogData(data);
-}
-
-void LogProcessor::HandleTcpConnection(uint64_t connectionId, const std::string& clientAddr, bool connected) {
-    if (connected) {
-        // 新连接
-        std::lock_guard<std::mutex> lock(connectionsMutex_);
-        connections_[connectionId] = clientAddr;
-    } else {
-        // 连接断开
-        std::lock_guard<std::mutex> lock(connectionsMutex_);
-        connections_.erase(connectionId);
+    bool submitted = SubmitLogData(data);
+    std::cout << "日志数据提交" << (submitted ? "成功" : "失败") << "，ID: " << data.id << std::endl;
+    
+    if (submitted) {
+        std::cout << "日志将被异步处理，将调用ProcessLogData函数解析并存储" << std::endl;
+        // 添加日志解析预览
+        try {
+            analyzer::LogRecord previewRecord = ParseLogData(data);
+            std::cout << "日志解析预览:" << std::endl;
+            std::cout << "- ID: " << previewRecord.id << std::endl;
+            std::cout << "- 时间戳: " << previewRecord.timestamp << std::endl;
+            std::cout << "- 级别: " << previewRecord.level << std::endl;
+            std::cout << "- 来源: " << previewRecord.source << std::endl;
+            std::cout << "- 消息: " << (previewRecord.message.size() > 50 ? previewRecord.message.substr(0, 50) + "..." : previewRecord.message) << std::endl;
+            std::cout << "- 字段数: " << previewRecord.fields.size() << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "日志解析预览失败: " << e.what() << std::endl;
+        }
     }
+    
+    // 检查存储器状态
+    if (mysqlStorage_) {
+        std::cout << "MySQL存储已初始化" << std::endl;
+    } else {
+        std::cerr << "MySQL存储未初始化，无法存储日志数据" << std::endl;
+    }
+    
+    if (redisStorage_) {
+        std::cout << "Redis存储已初始化" << std::endl;
+    } else {
+        std::cout << "Redis存储未初始化" << std::endl;
+    }
+    
+    std::cout << "当前待处理日志队列大小: " << GetPendingCount() << std::endl;
 }
 
 } // namespace processor
