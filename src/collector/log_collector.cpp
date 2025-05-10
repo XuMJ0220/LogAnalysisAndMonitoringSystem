@@ -5,6 +5,8 @@
 #include <iomanip>
 #include <ctime>
 #include <zlib.h>
+#include <optional>
+#include <memory>
 
 namespace xumj {
 namespace collector {
@@ -161,10 +163,11 @@ void LogCollector::Flush() {
     
     // 从队列中获取一批日志
     for (size_t i = 0; i < config_.batchSize; ++i) {
-        std::optional<LogEntry> entry = logQueue_.Pop();
-        if (!entry) break;  // 队列为空
-        
-        batch.push_back(std::move(*entry));
+        if (auto entry = logQueue_.Pop()) {
+            batch.push_back(std::move(*entry));
+        } else {
+            break;  // 队列为空
+        }
     }
     
     // 如果获取到了日志，发送它们
@@ -194,7 +197,7 @@ void LogCollector::Shutdown() {
 
 size_t LogCollector::GetPendingCount() const {
     // 返回当前未处理的日志数量（近似值）
-    return (logQueue_.IsEmpty() ? 0 : 1);  // 无法精确知道队列大小，但可以知道是否为空
+    return logQueue_.IsEmpty() ? 0 : 1;  // 无法精确知道队列大小，但可以知道是否为空
 }
 
 void LogCollector::SetSendCallback(std::function<void(size_t)> callback) {
@@ -205,15 +208,16 @@ void LogCollector::SetErrorCallback(std::function<void(const std::string&)> call
     errorCallback_ = std::move(callback);
 }
 
-bool LogCollector::SendLogBatch(const std::vector<LogEntry>& logs) {
+bool LogCollector::SendLogBatch(std::vector<LogEntry>& logs) {
     // 实际实现中，这里会通过网络发送日志到服务器
     // 在此示例中，我们只是简单地打印日志
     
     try {
-        for (const auto& log : logs) {
-            std::cout << "[" << TimestampToString(log.GetTimestamp()) << "] "
-                      << "[" << LogLevelToString(log.GetLevel()) << "] "
-                      << log.GetContent() << std::endl;
+        for (auto it = logs.begin(); it != logs.end();) {
+            std::cout << "[" << TimestampToString(it->GetTimestamp()) << "] "
+                      << "[" << LogLevelToString(it->GetLevel()) << "] "
+                      << it->GetContent() << std::endl;
+            it = logs.erase(it); // 删除当前元素并更新迭代器
         }
         
         // 调用成功回调
@@ -267,7 +271,8 @@ void LogCollector::HandleRetry(const std::vector<LogEntry>& logs) {
             }
             
             // 尝试重新发送
-            if (SendLogBatch(logs)) {
+            std::vector<LogEntry> retryLogs = logs;  // 创建副本
+            if (SendLogBatch(retryLogs)) {
                 return;  // 发送成功，结束重试
             }
         }

@@ -96,23 +96,20 @@ public:
     
     /**
      * @brief 从队列中弹出一个元素
-     * @return 如果队列非空，返回队头元素；否则返回空
+     * @return 如果队列非空，返回队头元素的智能指针；否则返回空
      */
-    std::optional<T> Pop() {
+    std::shared_ptr<T> Pop() {
         // 获取当前头节点
         Node* currHead = head_.load(std::memory_order_relaxed);
         Node* nextNode = currHead->next.load(std::memory_order_acquire);
         
         // 如果下一个节点为空，说明队列为空
         if (!nextNode) {
-            return std::nullopt;
+            return nullptr;
         }
         
         // 获取数据
-        std::optional<T> result;
-        if (nextNode->data) {
-            result = *nextNode->data;
-        }
+        std::shared_ptr<T> result = nextNode->data;
         
         // 更新头节点
         head_.store(nextNode, std::memory_order_relaxed);

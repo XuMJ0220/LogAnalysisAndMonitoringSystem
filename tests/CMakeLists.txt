@@ -77,6 +77,11 @@ target_link_libraries(test_collector PRIVATE
     pthread
     collector
     common
+    storage
+    network
+    analyzer
+    alert
+    ${ZLIB_LIBRARIES}
 )
 
 add_executable(test_alert test_alert_manager.cpp)

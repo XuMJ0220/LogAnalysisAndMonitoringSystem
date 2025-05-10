@@ -23,6 +23,14 @@ find_package(Threads REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(gRPC QUIET)
 
+# 查找ZLIB依赖
+find_package(ZLIB REQUIRED)
+if(ZLIB_FOUND)
+    message(STATUS "找到ZLIB: ${ZLIB_LIBRARIES}")
+else()
+    message(FATAL_ERROR "无法找到ZLIB库，请确保已安装")
+endif()
+
 # 手动设置gRPC路径
 if(NOT gRPC_FOUND)
     set(GRPC_CPP_PLUGIN_EXECUTABLE /usr/local/bin/grpc_cpp_plugin)
@@ -88,6 +96,7 @@ include_directories(
     ${GRPC_INCLUDE_DIRS}
     ${REDIS_INCLUDE_DIRS}
     ${MYSQL_INCLUDE_DIRS}
+    ${ZLIB_INCLUDE_DIRS}
 )
 
 # 添加子目录

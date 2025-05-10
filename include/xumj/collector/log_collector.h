@@ -20,12 +20,12 @@ namespace collector {
  * @brief 日志级别枚举，用于标识日志的重要性
  */
 enum class LogLevel {
-    TRACE,      ///< 跟踪级别，最详细的日志信息
-    DEBUG,      ///< 调试级别，用于开发调试
-    INFO,       ///< 信息级别，普通信息
-    WARNING,    ///< 警告级别，潜在问题
-    ERROR,      ///< 错误级别，影响功能但不致命
-    CRITICAL    ///< 严重级别，致命错误
+    TRACE,      // 跟踪级别，最详细的日志信息
+    DEBUG,      // 调试级别，用于开发调试
+    INFO,       // 信息级别，普通信息
+    WARNING,    // 警告级别，潜在问题
+    ERROR,      // 错误级别，影响功能但不致命
+    CRITICAL    // 严重级别，致命错误
 };
 
 /**
@@ -43,6 +43,46 @@ public:
     LogEntry(std::string content, LogLevel level, 
              std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::now())
         : content_(std::move(content)), level_(level), timestamp_(timestamp) {}
+    
+    /**
+     * @brief 拷贝构造函数
+     */
+    LogEntry(const LogEntry& other)
+        : content_(other.content_),
+          level_(other.level_),
+          timestamp_(other.timestamp_) {}
+    
+    /**
+     * @brief 移动构造函数
+     */
+    LogEntry(LogEntry&& other) noexcept
+        : content_(std::move(other.content_)),
+          level_(other.level_),
+          timestamp_(other.timestamp_) {}
+    
+    /**
+     * @brief 拷贝赋值运算符
+     */
+    LogEntry& operator=(const LogEntry& other) {
+        if (this != &other) {
+            content_ = other.content_;
+            level_ = other.level_;
+            timestamp_ = other.timestamp_;
+        }
+        return *this;
+    }
+    
+    /**
+     * @brief 移动赋值运算符
+     */
+    LogEntry& operator=(LogEntry&& other) noexcept {
+        if (this != &other) {
+            content_ = std::move(other.content_);
+            level_ = other.level_;
+            timestamp_ = other.timestamp_;
+        }
+        return *this;
+    }
     
     /**
      * @brief 获取日志内容
@@ -63,9 +103,9 @@ public:
     std::chrono::system_clock::time_point GetTimestamp() const { return timestamp_; }
     
 private:
-    std::string content_;                           ///< 日志内容
-    LogLevel level_;                                ///< 日志级别
-    std::chrono::system_clock::time_point timestamp_; ///< 时间戳
+    std::string content_;                           // 日志内容
+    LogLevel level_;                                // 日志级别
+    std::chrono::system_clock::time_point timestamp_; // 时间戳
 };
 
 /**
@@ -106,7 +146,7 @@ public:
     }
     
 private:
-    LogLevel minLevel_; ///< 最低接受的日志级别
+    LogLevel minLevel_; // 最低接受的日志级别
 };
 
 /**
@@ -118,7 +158,7 @@ public:
     /**
      * @brief 构造函数
      * @param keywords 要过滤的关键字集合
-     * @param filterMode 过滤模式（true为包含任意关键字则过滤，false为不包含任意关键字则过滤）
+     * @param filterMode 过滤模式（true为包含任意关键字则过滤，false为不包含任意关键字则过滤包含了则不过滤）
      */
     KeywordFilter(std::vector<std::string> keywords, bool filterMode = true)
         : keywords_(std::move(keywords)), filterMode_(filterMode) {}
@@ -137,12 +177,12 @@ public:
             }
         }
         
-        return filterMode_ ? containsAnyKeyword : !containsAnyKeyword;
+        return filterMode_ ? containsAnyKeyword : !containsAnyKeyword; 
     }
     
 private:
-    std::vector<std::string> keywords_; ///< 关键字集合
-    bool filterMode_;                   ///< 过滤模式
+    std::vector<std::string> keywords_; // 关键字集合
+    bool filterMode_;                   // 过滤模式
 };
 
 /**
@@ -150,19 +190,19 @@ private:
  * @brief 日志收集器的配置参数
  */
 struct CollectorConfig {
-    std::string collectorId;                  ///< 收集器唯一标识
-    std::string serverAddress;                ///< 日志服务器地址
-    uint16_t serverPort{8080};                ///< 日志服务器端口
-    size_t batchSize{100};                    ///< 批处理大小
-    std::chrono::milliseconds flushInterval{1000}; ///< 强制刷新间隔
-    size_t maxQueueSize{10000};               ///< 最大队列大小
-    size_t threadPoolSize{2};                 ///< 工作线程数量
-    size_t memoryPoolSize{1024};              ///< 内存池大小
-    LogLevel minLevel{LogLevel::INFO};        ///< 最低收集的日志级别
-    bool compressLogs{true};                  ///< 是否压缩日志
-    bool enableRetry{true};                   ///< 是否启用重试机制
-    uint32_t maxRetryCount{3};                ///< 最大重试次数
-    std::chrono::milliseconds retryInterval{5000}; ///< 重试间隔
+    std::string collectorId;                  // 收集器唯一标识
+    std::string serverAddress;                // 日志服务器地址
+    uint16_t serverPort{8080};                // 日志服务器端口
+    size_t batchSize{100};                    // 批处理大小
+    std::chrono::milliseconds flushInterval{1000}; // 强制刷新间隔
+    size_t maxQueueSize{10000};               // 最大队列大小
+    size_t threadPoolSize{2};                 // 工作线程数量
+    size_t memoryPoolSize{1024};              // 内存池大小
+    LogLevel minLevel{LogLevel::INFO};        // 最低收集的日志级别
+    bool compressLogs{true};                  // 是否压缩日志
+    bool enableRetry{true};                   // 是否启用重试机制
+    uint32_t maxRetryCount{3};                // 最大重试次数
+    std::chrono::milliseconds retryInterval{5000}; // 重试间隔
 };
 
 /**
@@ -253,23 +293,23 @@ public:
     void SetErrorCallback(std::function<void(const std::string&)> callback);
     
 private:
-    CollectorConfig config_;                                     ///< 收集器配置
-    std::atomic<bool> isActive_;                                ///< 收集器是否活动
-    common::LockFreeQueue<LogEntry> logQueue_;                   ///< 日志队列
-    std::unique_ptr<common::ThreadPool> threadPool_;             ///< 工作线程池
-    std::unique_ptr<common::MemoryPool> memoryPool_;             ///< 内存池
-    std::vector<std::shared_ptr<LogFilterInterface>> filters_;   ///< 过滤器列表
-    mutable std::mutex filtersMutex_;                           ///< 过滤器互斥锁
-    std::thread flushThread_;                                   ///< 定时刷新线程
-    std::function<void(size_t)> sendCallback_;                   ///< 发送成功回调
-    std::function<void(const std::string&)> errorCallback_;       ///< 错误回调
+    CollectorConfig config_;                                     // 收集器配置
+    std::atomic<bool> isActive_;                                // 收集器是否活动
+    common::LockFreeQueue<LogEntry> logQueue_;                   // 日志队列
+    std::unique_ptr<common::ThreadPool> threadPool_;             // 工作线程池
+    std::unique_ptr<common::MemoryPool> memoryPool_;             // 内存池
+    std::vector<std::shared_ptr<LogFilterInterface>> filters_;   // 过滤器列表
+    mutable std::mutex filtersMutex_;                           // 过滤器互斥锁
+    std::thread flushThread_;                                   // 定时刷新线程
+    std::function<void(size_t)> sendCallback_;                   // 发送成功回调
+    std::function<void(const std::string&)> errorCallback_;       // 错误回调
     
     /**
      * @brief 发送日志批次
      * @param logs 日志条目批次
      * @return 发送是否成功
      */
-    bool SendLogBatch(const std::vector<LogEntry>& logs);
+    bool SendLogBatch(std::vector<LogEntry>& logs);
     
     /**
      * @brief 定时刷新线程函数
