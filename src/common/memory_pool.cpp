@@ -72,7 +72,7 @@ bool MemoryPool::Deallocate(void* ptr) {
     // 查找这个指针对应的块大小
     auto it = ptrToSizeMap_.find(ptr);
     if (it == ptrToSizeMap_.end()) {
-        return false;  // 不是由这个内存池分配的内存
+        return false;  // 不是由这个内存池分配的内存，或者是已经被释放的内存
     }
     
     size_t size = it->second;
@@ -149,8 +149,8 @@ void MemoryPool::AllocateChunks(size_t numChunks) {
         }
         
         // 将新分配的块添加到列表中
-        freeChunks_.push_back(chunk);
-        allocatedChunks_.push_back(chunk);
+        freeChunks_.push_back(chunk);//这里不能用emplace_back，因为下面还需要用到chunk
+        allocatedChunks_.push_back(chunk);//这里可以用emplace_back
     }
 }
 

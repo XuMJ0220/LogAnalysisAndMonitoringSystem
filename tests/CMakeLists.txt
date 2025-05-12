@@ -143,4 +143,45 @@ target_link_libraries(test_storage PRIVATE
     pthread
     storage
     common
-) 
+)
+
+# 设置包含目录
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# 添加MySQL调试测试可执行文件
+add_executable(mysql_debug_test mysql_debug_test.cpp)
+
+# 链接库
+target_link_libraries(mysql_debug_test
+    storage
+    common
+    ${MYSQLCLIENT_LIBRARIES}
+    ${UUID_LIBRARIES}
+)
+
+# 设置输出目录
+set_target_properties(mysql_debug_test
+    PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+# 添加依赖关系
+add_dependencies(mysql_debug_test 
+    storage 
+    common
+)
+
+# 添加集成测试
+add_executable(log_processing_integration_test integration/log_processing_integration_test.cpp)
+target_link_libraries(log_processing_integration_test
+    xumj_network
+    xumj_processor
+    xumj_storage
+    xumj_common
+    ${MYSQL_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+
+# 添加子目录
+add_subdirectory(integration)
+add_subdirectory(performance) 

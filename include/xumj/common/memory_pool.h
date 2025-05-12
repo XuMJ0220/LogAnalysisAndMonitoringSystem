@@ -130,6 +130,8 @@ public:
         T* object = new (memory) T(std::forward<Args>(args)...);
         
         // 创建自定义删除器的共享指针，确保对象被正确析构并返回内存池
+        //这里如果不使用自定义删除器，当引用计数为0，会调用T的析构，而且会delete object的内存
+        //而这里的object是memoryPool_开辟的内存
         return std::shared_ptr<T>(object, [this](T* obj) {
             // 调用对象的析构函数
             obj->~T();

@@ -13,12 +13,11 @@ LogData CreateSampleLogData(int index) {
     data.id = "data-" + std::to_string(index);
     data.timestamp = std::chrono::system_clock::now();
     data.source = "example-client";
-    data.compressed = false;
     
     // 根据索引生成不同格式的日志数据
     if (index % 3 == 0) {
         // 生成类似于nginx访问日志格式
-        data.data = "192.168.1." + std::to_string(index % 256) + 
+        data.message = "192.168.1." + std::to_string(index % 256) + 
                    " - user" + std::to_string(index % 100) + 
                    " [15/Jul/2023:10:30:" + std::to_string(index % 60) + 
                    " +0800] \"GET /api/resource/" + std::to_string(index) + 
@@ -26,7 +25,7 @@ LogData CreateSampleLogData(int index) {
                    " \"http://example.com/referer\" \"Mozilla/5.0\"";
     } else if (index % 3 == 1) {
         // 生成JSON格式日志
-        data.data = "{\"timestamp\":\"2023-07-15T10:30:" + std::to_string(index % 60) + 
+        data.message = "{\"timestamp\":\"2023-07-15T10:30:" + std::to_string(index % 60) + 
                    "\",\"level\":\"" + (index % 5 == 0 ? "ERROR" : "INFO") + 
                    "\",\"source\":\"TestApp\",\"message\":\"操作" + 
                    std::to_string(index) + "完成\",\"duration\":" + 
@@ -34,7 +33,7 @@ LogData CreateSampleLogData(int index) {
                    ",\"user_id\":" + std::to_string(1000 + index) + "}";
     } else {
         // 生成简单的文本日志
-        data.data = "[2023-07-15 10:30:" + std::to_string(index % 60) + 
+        data.message = "[2023-07-15 10:30:" + std::to_string(index % 60) + 
                    "] [" + (index % 5 == 0 ? "ERROR" : "INFO") + 
                    "] 进程" + std::to_string(index) + 
                    "执行任务" + std::to_string(index * 10) + 
@@ -46,11 +45,6 @@ LogData CreateSampleLogData(int index) {
     data.metadata["session_id"] = "session-" + std::to_string(index / 5);
     
     return data;
-}
-
-// 处理完成回调函数
-void OnProcessComplete(const std::string& logId, bool success) {
-    std::cout << "日志处理" << (success ? "成功" : "失败") << "：ID = " << logId << std::endl;
 }
 
 // 分析完成回调函数
@@ -76,70 +70,35 @@ void OnAnalysisComplete(const std::string& logId, const std::unordered_map<std::
     std::cout << "------------------------" << std::endl;
 }
 
+// 自定义JSON日志解析器
+class CustomJsonLogParser : public JsonLogParser {
+public:
+    CustomJsonLogParser(const std::string& name) {
+        name_ = name;
+    }
+    
+    std::string GetType() const override {
+        return name_;
+    }
+
+private:
+    std::string name_;
+};
+
 int main() {
     std::cout << "开始日志处理器示例程序..." << std::endl;
     
     // 创建处理器配置
-    ProcessorConfig config;
-    config.threadPoolSize = 2;
-    config.processInterval = std::chrono::seconds(1);
-    config.batchSize = 5;
-    config.maxQueueSize = 100;
-    config.compressArchive = false;  // 示例中不压缩
-    
-    // 配置内部分析器
-    config.analyzerConfig.threadPoolSize = 2;
-    config.analyzerConfig.storeResults = false;  // 示例中不存储
+    LogProcessorConfig config;
+    config.workerThreads = 2;
+    config.queueSize = 100;
+    config.debug = true;
     
     // 创建日志处理器
     LogProcessor processor(config);
     
     // 添加日志解析器
-    
-    // 1. Nginx访问日志解析器
-    std::unordered_map<int, std::string> nginxMapping;
-    nginxMapping[1] = "client_ip";
-    nginxMapping[2] = "username";
-    nginxMapping[3] = "timestamp";
-    nginxMapping[4] = "request";
-    nginxMapping[5] = "status";
-    nginxMapping[6] = "bytes";
-    nginxMapping[7] = "referer";
-    nginxMapping[8] = "user_agent";
-    
-    processor.AddParser(std::make_shared<RegexLogParser>(
-        "NginxAccessLog",
-        "([\\d\\.]+) - (\\S+) \\[(.*?)\\] \"([^\"]*)\" (\\d+) (\\d+) \"([^\"]*)\" \"([^\"]*)\"",
-        nginxMapping
-    ));
-    
-    // 2. JSON日志解析器
-    std::unordered_map<std::string, std::string> jsonMapping;
-    jsonMapping["timestamp"] = "timestamp";
-    jsonMapping["level"] = "level";
-    jsonMapping["source"] = "source";
-    jsonMapping["message"] = "message";
-    jsonMapping["duration"] = "duration";
-    jsonMapping["user_id"] = "user_id";
-    
-    processor.AddParser(std::make_shared<JsonLogParser>(
-        "JsonLog",
-        jsonMapping
-    ));
-    
-    // 3. 简单文本日志解析器
-    std::unordered_map<int, std::string> textMapping;
-    textMapping[1] = "timestamp";
-    textMapping[2] = "level";
-    textMapping[3] = "process_id";
-    textMapping[4] = "task_id";
-    textMapping[5] = "status";
-    
-    processor.AddParser(std::make_shared<RegexLogParser>(
-        "TextLog",
-        "\\[(.*?)\\] \\[(.*?)\\] 进程(\\d+)执行任务(\\d+)，状态：(.*?)$",
-        textMapping
-    ));
+    processor.AddLogParser(std::make_shared<CustomJsonLogParser>("JsonLog"));
     
     // 获取分析器实例并添加分析规则
     auto analyzer = processor.GetAnalyzer();
@@ -169,16 +128,13 @@ int main() {
         analyzer->SetAnalysisCallback(OnAnalysisComplete);
     }
     
-    // 设置处理完成回调
-    processor.SetProcessCallback(OnProcessComplete);
-    
     // 启动处理器
     if (!processor.Start()) {
         std::cerr << "启动处理器失败" << std::endl;
         return 1;
     }
     
-    std::cout << "处理器已启动，解析器数量：" << processor.GetParserCount() << std::endl;
+    std::cout << "处理器已启动" << std::endl;
     
     // 创建并提交示例日志数据
     std::vector<LogData> dataList;
@@ -186,9 +142,13 @@ int main() {
         dataList.push_back(CreateSampleLogData(i));
     }
     
-    // 批量提交日志数据
-    size_t submittedCount = processor.SubmitLogDataBatch(dataList);
-    std::cout << "提交了 " << submittedCount << " 条日志数据进行处理" << std::endl;
+    // 单独提交日志数据
+    for (const auto& data : dataList) {
+        bool submitted = processor.SubmitLogData(data);
+        if (submitted) {
+            std::cout << "提交了日志数据：ID = " << data.id << std::endl;
+        }
+    }
     
     // 等待处理和分析完成
     std::cout << "等待处理完成..." << std::endl;

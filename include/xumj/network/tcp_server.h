@@ -137,6 +137,13 @@ public:
      */
     uint16_t GetPort() const;
     
+    /**
+     * @brief 获取连接指针
+     * @param id 连接ID
+     * @return 连接指针
+     */
+    muduo::net::TcpConnectionPtr GetConnection(uint64_t id);
+    
 private:
     // muduo事件循环
     std::unique_ptr<muduo::net::EventLoop> loop_;
@@ -173,7 +180,6 @@ private:
     // 连接ID与连接对象的映射管理
     void RegisterConnection(uint64_t id, const TcpConnectionPtr& conn);
     void UnregisterConnection(uint64_t id);
-    TcpConnectionPtr GetConnection(uint64_t id);
 };
 
 } // namespace network

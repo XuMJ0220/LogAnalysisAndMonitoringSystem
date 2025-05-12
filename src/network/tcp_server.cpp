@@ -210,36 +210,73 @@ void TcpServer::HandleConnection(const TcpConnectionPtr& conn, bool connected) {
 }
 
 void TcpServer::HandleMessage(const TcpConnectionPtr& conn, 
-                              muduo::net::Buffer* buffer,
-                              muduo::Timestamp timestamp) {
-    // 从连接上下文中获取ID
-    uint64_t connectionId = 0;
-    try {
-        connectionId = boost::any_cast<uint64_t>(conn->getContext());
-    } catch (const boost::bad_any_cast&) {
-        std::cerr << "Failed to get connection ID from context." << std::endl;
-        return;
-    }
-    
-    // 获取消息内容
-    std::string message = buffer->retrieveAllAsString();
-    
-    // 添加详细日志
-    std::cout << "===== TCP服务器收到消息 =====" << std::endl;
-    std::cout << "- 服务器: " << serverName_ << std::endl;
-    std::cout << "- 连接ID: " << connectionId << std::endl;
-    std::cout << "- 客户端: " << conn->peerAddress().toIpPort() << std::endl;
-    std::cout << "- 消息大小: " << message.size() << " 字节" << std::endl;
-    std::cout << "- 时间戳: " << timestamp.toString() << std::endl;
-    std::cout << "- 消息预览: " << (message.size() > 50 ? message.substr(0, 50) + "..." : message) << std::endl;
-    std::cout << "==========================" << std::endl;
-    
-    // 调用用户回调
-    if (messageCallback_) {
-        std::cout << "调用用户消息回调..." << std::endl;
-        messageCallback_(connectionId, message, timestamp);
-    } else {
-        std::cerr << "警告: TCP服务器没有设置消息回调函数，消息将被丢弃" << std::endl;
+                             muduo::net::Buffer* buffer,
+                             muduo::Timestamp timestamp) {
+    // 获取所有完整消息
+    while (buffer->readableBytes() > 0) {
+        // 提取完整消息（假设每行是一条完整消息）
+        const char* crlf = buffer->findCRLF();
+        if (crlf) {
+            // 找到消息结束符，提取一整行
+            std::string message(buffer->peek(), crlf);
+            buffer->retrieveUntil(crlf + 2);  // 跳过CRLF
+            
+            std::cout << "TcpServer::HandleMessage - 收到消息: " << message << std::endl;
+            
+            // 查找对应的连接ID
+            uint64_t connectionId = 0;
+            {
+                std::lock_guard<std::mutex> lock(connectionsMutex_);
+                for (const auto& kv : connections_) {
+                    if (kv.second.get() == conn.get()) {
+                        connectionId = kv.first;
+                        break;
+                    }
+                }
+            }
+            
+            // 如果找到连接ID，则调用用户回调
+            if (connectionId > 0 && messageCallback_) {
+                messageCallback_(connectionId, message, timestamp);
+            } else {
+                std::cerr << "TcpServer - 消息回调失败: " 
+                          << (connectionId <= 0 ? "找不到连接ID" : "未设置回调函数")
+                          << std::endl;
+            }
+        } else {
+            // 未找到消息结束符，可能是不完整的消息
+            // 1. 如果消息足够长，则视为一条完整消息
+            if (buffer->readableBytes() > 8192) {  // 8KB
+                std::string message(buffer->peek(), buffer->readableBytes());
+                buffer->retrieveAll();
+                
+                std::cout << "TcpServer::HandleMessage - 收到大块消息（无换行符）: " 
+                          << message.substr(0, 100) << "..." 
+                          << std::endl;
+                
+                // 找到连接ID
+                uint64_t connectionId = 0;
+                {
+                    std::lock_guard<std::mutex> lock(connectionsMutex_);
+                    for (const auto& kv : connections_) {
+                        if (kv.second.get() == conn.get()) {
+                            connectionId = kv.first;
+                            break;
+                        }
+                    }
+                }
+                
+                // 调用回调
+                if (connectionId > 0 && messageCallback_) {
+                    messageCallback_(connectionId, message, timestamp);
+                }
+            } else {
+                // 2. 否则，等待更多数据
+                std::cout << "TcpServer - 消息不完整，等待更多数据...（当前 " 
+                        << buffer->readableBytes() << " 字节）" << std::endl;
+                break;
+            }
+        }
     }
 }
 

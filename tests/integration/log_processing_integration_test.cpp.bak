@@ -1,0 +1,659 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <memory>
+#include <thread>
+#include <chrono>
+#include <fstream>
+#include <random>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <map>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <mysql/mysql.h>
+#include <sstream>
+#include <iomanip>
+#include <muduo/base/Timestamp.h>
+
+#include "../../include/xumj/common/log_entry.h"
+#include "../../include/xumj/storage/mysql_storage.h"
+#include "../../include/xumj/network/tcp_server.h"
+
+// 测试配置
+const int TEST_PORT = 9999;
+const std::string TEST_DB_HOST = "localhost";
+const std::string TEST_DB_USER = "root";
+const std::string TEST_DB_PASSWORD = "password";
+const std::string TEST_DB_NAME = "log_analysis_test";
+const std::string TEST_TABLE_NAME = "integration_test_logs";
+const int LOG_COUNT = 200;
+const int TEST_TIMEOUT_SECONDS = 30;
+
+// 用于同步的变量
+std::mutex mtx;
+std::condition_variable cv;
+std::atomic<int> processed_logs(0);
+std::atomic<bool> test_complete(false);
+
+// 函数声明，以便JsonLogParser可以调用
+std::string GenerateUUID();
+std::string GetCurrentTimestamp();
+
+// 简单的JSON解析器实现
+class JsonLogParser {
+public:
+    std::shared_ptr<xumj::LogEntry> Parse(const std::string& jsonString) {
+        try {
+            auto logEntry = std::make_shared<xumj::LogEntry>();
+            
+            std::string::size_type idPos = jsonString.find("\"id\":");
+            if (idPos != std::string::npos) {
+                std::string::size_type startPos = jsonString.find("\"", idPos + 5) + 1;
+                std::string::size_type endPos = jsonString.find("\"", startPos);
+                if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                    logEntry->SetId(jsonString.substr(startPos, endPos - startPos));
+                }
+            } else {
+                idPos = jsonString.find("\"log_id\":");
+                if (idPos != std::string::npos) {
+                    std::string::size_type startPos = jsonString.find("\"", idPos + 9) + 1;
+                    std::string::size_type endPos = jsonString.find("\"", startPos);
+                    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                        logEntry->SetId(jsonString.substr(startPos, endPos - startPos));
+                    }
+                } else {
+                    logEntry->SetId(GenerateUUID());
+                }
+            }
+            
+            std::string::size_type timestampPos = jsonString.find("\"timestamp\":");
+            if (timestampPos != std::string::npos) {
+                std::string::size_type startPos = jsonString.find("\"", timestampPos + 12) + 1;
+                std::string::size_type endPos = jsonString.find("\"", startPos);
+                if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                    logEntry->SetTimestamp(jsonString.substr(startPos, endPos - startPos));
+                }
+            } else {
+                timestampPos = jsonString.find("\"time\":");
+                if (timestampPos != std::string::npos) {
+                    std::string::size_type startPos = jsonString.find("\"", timestampPos + 7) + 1;
+                    std::string::size_type endPos = jsonString.find("\"", startPos);
+                    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                        logEntry->SetTimestamp(jsonString.substr(startPos, endPos - startPos));
+                    }
+                } else {
+                    logEntry->SetTimestamp(GetCurrentTimestamp());
+                }
+            }
+            
+            std::string::size_type levelPos = jsonString.find("\"level\":");
+            if (levelPos != std::string::npos) {
+                std::string::size_type startPos = jsonString.find("\"", levelPos + 8) + 1;
+                std::string::size_type endPos = jsonString.find("\"", startPos);
+                if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                    logEntry->SetLevel(jsonString.substr(startPos, endPos - startPos));
+                }
+            } else {
+                levelPos = jsonString.find("\"severity\":");
+                if (levelPos != std::string::npos) {
+                    std::string::size_type startPos = jsonString.find("\"", levelPos + 11) + 1;
+                    std::string::size_type endPos = jsonString.find("\"", startPos);
+                    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                        logEntry->SetLevel(jsonString.substr(startPos, endPos - startPos));
+                    }
+                } else {
+                    logEntry->SetLevel("INFO");
+                }
+            }
+            
+            std::string::size_type sourcePos = jsonString.find("\"source\":");
+            if (sourcePos != std::string::npos) {
+                std::string::size_type startPos = jsonString.find("\"", sourcePos + 9) + 1;
+                std::string::size_type endPos = jsonString.find("\"", startPos);
+                if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                    logEntry->SetSource(jsonString.substr(startPos, endPos - startPos));
+                }
+            } else {
+                sourcePos = jsonString.find("\"service\":");
+                if (sourcePos != std::string::npos) {
+                    std::string::size_type startPos = jsonString.find("\"", sourcePos + 10) + 1;
+                    std::string::size_type endPos = jsonString.find("\"", startPos);
+                    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                        logEntry->SetSource(jsonString.substr(startPos, endPos - startPos));
+                    }
+                } else {
+                    logEntry->SetSource("unknown");
+                }
+            }
+            
+            std::string::size_type messagePos = jsonString.find("\"message\":");
+            if (messagePos != std::string::npos) {
+                std::string::size_type startPos = jsonString.find("\"", messagePos + 10) + 1;
+                std::string::size_type endPos = jsonString.find("\"", startPos);
+                if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                    logEntry->SetMessage(jsonString.substr(startPos, endPos - startPos));
+                }
+            } else {
+                messagePos = jsonString.find("\"msg\":");
+                if (messagePos != std::string::npos) {
+                    std::string::size_type startPos = jsonString.find("\"", messagePos + 6) + 1;
+                    std::string::size_type endPos = jsonString.find("\"", startPos);
+                    if (startPos != std::string::npos && endPos != std::string::npos && startPos < endPos) {
+                        logEntry->SetMessage(jsonString.substr(startPos, endPos - startPos));
+                    }
+                } else {
+                    logEntry->SetMessage(jsonString);
+                }
+            }
+            
+            return logEntry;
+        } catch (...) {
+            return nullptr;
+        }
+    }
+};
+
+// 生成随机UUID
+std::string GenerateUUID() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 15);
+    static std::uniform_int_distribution<> dis2(8, 11);
+
+    std::stringstream ss;
+    int i;
+    ss << std::hex;
+    for (i = 0; i < 8; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    for (i = 0; i < 4; i++) {
+        ss << dis(gen);
+    }
+    ss << "-4";
+    for (i = 0; i < 3; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    ss << dis2(gen);
+    for (i = 0; i < 3; i++) {
+        ss << dis(gen);
+    }
+    ss << "-";
+    for (i = 0; i < 12; i++) {
+        ss << dis(gen);
+    };
+    return ss.str();
+}
+
+// 生成当前时间戳
+std::string GetCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%dT%H:%M:%S");
+    return ss.str();
+}
+
+// 生成测试日志
+std::vector<std::string> GenerateTestLogs(int count) {
+    std::vector<std::string> logs;
+    
+    // 日志级别
+    std::vector<std::string> levels = {"INFO", "WARNING", "ERROR", "DEBUG"};
+    
+    // 日志来源
+    std::vector<std::string> sources = {
+        "auth_service", "payment_service", "cart_service", 
+        "database", "resource_monitor", "api_gateway"
+    };
+    
+    // 日志消息模板
+    std::vector<std::string> messages = {
+        "用户登录成功: {user}",
+        "用户登录失败: {user}, 原因: 密码错误",
+        "支付处理超时: {transaction}",
+        "购物车添加商品: {product}, 数量: {quantity}",
+        "数据库查询耗时: {time}ms",
+        "CPU使用率: {cpu}%",
+        "内存使用: {memory}MB",
+        "API请求: {endpoint}, 状态码: {status}"
+    };
+    
+    // 随机生成器
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> level_dist(0, levels.size() - 1);
+    std::uniform_int_distribution<> source_dist(0, sources.size() - 1);
+    std::uniform_int_distribution<> message_dist(0, messages.size() - 1);
+    std::uniform_int_distribution<> format_dist(0, 5); // 用于生成不同格式的日志
+    
+    for (int i = 0; i < count; ++i) {
+        std::string id = GenerateUUID();
+        std::string timestamp = GetCurrentTimestamp();
+        std::string level = levels[level_dist(gen)];
+        std::string source = sources[source_dist(gen)];
+        std::string message = messages[message_dist(gen)];
+        
+        // 替换消息中的占位符
+        if (message.find("{user}") != std::string::npos) {
+            message.replace(message.find("{user}"), 6, "user" + std::to_string(i % 100));
+        }
+        if (message.find("{transaction}") != std::string::npos) {
+            message.replace(message.find("{transaction}"), 13, "txn-" + std::to_string(i));
+        }
+        if (message.find("{product}") != std::string::npos) {
+            message.replace(message.find("{product}"), 9, "product-" + std::to_string(i % 50));
+        }
+        if (message.find("{quantity}") != std::string::npos) {
+            message.replace(message.find("{quantity}"), 10, std::to_string(1 + (i % 10)));
+        }
+        if (message.find("{time}") != std::string::npos) {
+            message.replace(message.find("{time}"), 6, std::to_string(50 + (i % 500)));
+        }
+        if (message.find("{cpu}") != std::string::npos) {
+            message.replace(message.find("{cpu}"), 5, std::to_string(10 + (i % 90)));
+        }
+        if (message.find("{memory}") != std::string::npos) {
+            message.replace(message.find("{memory}"), 8, std::to_string(100 + (i % 900)));
+        }
+        if (message.find("{endpoint}") != std::string::npos) {
+            message.replace(message.find("{endpoint}"), 10, "/api/v1/resource/" + std::to_string(i % 20));
+        }
+        if (message.find("{status}") != std::string::npos) {
+            int status_codes[] = {200, 201, 400, 401, 403, 404, 500};
+            message.replace(message.find("{status}"), 8, std::to_string(status_codes[i % 7]));
+        }
+        
+        // 生成不同格式的JSON日志
+        int format = format_dist(gen);
+        std::string log;
+        
+        switch (format) {
+            case 0: // 标准格式
+                log = "{\"id\":\"" + id + "\",\"timestamp\":\"" + timestamp + 
+                      "\",\"level\":\"" + level + "\",\"source\":\"" + source + 
+                      "\",\"message\":\"" + message + "\"}";
+                break;
+                
+            case 1: // 使用log_id而不是id
+                log = "{\"log_id\":\"" + id + "\",\"timestamp\":\"" + timestamp + 
+                      "\",\"level\":\"" + level + "\",\"source\":\"" + source + 
+                      "\",\"message\":\"" + message + "\"}";
+                break;
+                
+            case 2: // 使用time而不是timestamp
+                log = "{\"id\":\"" + id + "\",\"time\":\"" + timestamp + 
+                      "\",\"level\":\"" + level + "\",\"source\":\"" + source + 
+                      "\",\"message\":\"" + message + "\"}";
+                break;
+                
+            case 3: // 使用severity而不是level
+                log = "{\"id\":\"" + id + "\",\"timestamp\":\"" + timestamp + 
+                      "\",\"severity\":\"" + level + "\",\"source\":\"" + source + 
+                      "\",\"message\":\"" + message + "\"}";
+                break;
+                
+            case 4: // 使用service而不是source
+                log = "{\"id\":\"" + id + "\",\"timestamp\":\"" + timestamp + 
+                      "\",\"level\":\"" + level + "\",\"service\":\"" + source + 
+                      "\",\"message\":\"" + message + "\"}";
+                break;
+                
+            case 5: // 使用msg而不是message
+                log = "{\"id\":\"" + id + "\",\"timestamp\":\"" + timestamp + 
+                      "\",\"level\":\"" + level + "\",\"source\":\"" + source + 
+                      "\",\"msg\":\"" + message + "\"}";
+                break;
+        }
+        
+        logs.push_back(log);
+    }
+    
+    // 添加一些格式错误的日志
+    if (count >= 100) {
+        int errorCount = count * 0.1; // 10%的错误日志
+        for (int i = 0; i < errorCount; ++i) {
+            int index = i * 10; // 每10条放一个错误日志
+            if (index < logs.size()) {
+                // 生成各种错误类型
+                switch (i % 5) {
+                    case 0: // 缺少字段
+                        logs[index] = "{\"id\":\"" + GenerateUUID() + "\",\"level\":\"ERROR\"}";
+                        break;
+                    case 1: // JSON格式错误
+                        logs[index] = "{\"id\":\"" + GenerateUUID() + "\",\"timestamp\":\"" + 
+                                     GetCurrentTimestamp() + "\"level\":\"ERROR\"}"; // 缺少逗号
+                        break;
+                    case 2: // 空JSON
+                        logs[index] = "{}";
+                        break;
+                    case 3: // 非JSON字符串
+                        logs[index] = "这不是一个JSON字符串";
+                        break;
+                    case 4: // 类型错误
+                        logs[index] = "{\"id\":" + std::to_string(i) + ",\"timestamp\":\"" + 
+                                     GetCurrentTimestamp() + "\",\"level\":123}"; // level应该是字符串
+                        break;
+                }
+            }
+        }
+    }
+    
+    return logs;
+}
+
+// 简化版的日志处理器，用于集成测试
+class TestLogProcessor {
+public:
+    TestLogProcessor(std::shared_ptr<JsonLogParser> parser, 
+                     std::shared_ptr<xumj::storage::MySQLStorage> storage)
+        : parser_(parser), storage_(storage) {}
+    
+    void Process(const std::string& logData) {
+        // 解析日志
+        auto logEntryPtr = parser_->Parse(logData);
+        
+        // 如果解析成功，则存储日志
+        if (logEntryPtr) {
+            // 转换为MySQLStorage::LogEntry
+            xumj::storage::MySQLStorage::LogEntry entry;
+            entry.id = logEntryPtr->GetId();
+            entry.timestamp = logEntryPtr->GetTimestamp();
+            entry.level = logEntryPtr->GetLevel();
+            entry.source = logEntryPtr->GetSource();
+            entry.message = logEntryPtr->GetMessage();
+            
+            storage_->SaveLogEntry(entry);
+            
+            // 增加处理日志计数
+            processed_logs++;
+            
+            // 如果所有日志都已处理，通知测试完成
+            if (processed_logs >= LOG_COUNT) {
+                std::unique_lock<std::mutex> lock(mtx);
+                test_complete = true;
+                cv.notify_all();
+            }
+        }
+    }
+    
+private:
+    std::shared_ptr<JsonLogParser> parser_;
+    std::shared_ptr<xumj::storage::MySQLStorage> storage_;
+};
+
+// 测试TCP客户端，用于发送日志
+void RunTcpClient(const std::vector<std::string>& logs) {
+    // 等待服务器启动
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    
+    try {
+        // 创建客户端socket
+        int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+        if (clientSocket < 0) {
+            std::cerr << "创建客户端socket失败" << std::endl;
+            return;
+        }
+        
+        // 设置服务器地址
+        struct sockaddr_in serverAddr;
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_port = htons(TEST_PORT);
+        serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        
+        // 连接服务器
+        if (connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+            std::cerr << "连接服务器失败" << std::endl;
+            close(clientSocket);
+            return;
+        }
+        
+        std::cout << "TCP客户端已连接到服务器，开始发送日志..." << std::endl;
+        
+        // 发送所有日志
+        int count = 0;
+        for (const auto& log : logs) {
+            send(clientSocket, log.c_str(), log.length(), 0);
+            send(clientSocket, "\n", 1, 0); // 添加换行符作为分隔符
+            
+            // 每发送10条日志暂停一下，避免发送过快
+            if (++count % 10 == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        
+        std::cout << "所有日志已发送完毕，共 " << logs.size() << " 条" << std::endl;
+        
+        // 关闭连接
+        close(clientSocket);
+    } catch (const std::exception& e) {
+        std::cerr << "TCP客户端异常: " << e.what() << std::endl;
+    }
+}
+
+// 初始化测试数据库
+bool InitTestDatabase() {
+    try {
+        // 连接MySQL
+        MYSQL* conn = mysql_init(NULL);
+        if (!mysql_real_connect(conn, TEST_DB_HOST.c_str(), TEST_DB_USER.c_str(), 
+                               TEST_DB_PASSWORD.c_str(), "", 0, NULL, 0)) {
+            std::cerr << "连接MySQL失败: " << mysql_error(conn) << std::endl;
+            return false;
+        }
+        
+        // 创建测试数据库
+        std::string createDbSql = "CREATE DATABASE IF NOT EXISTS " + TEST_DB_NAME;
+        if (mysql_query(conn, createDbSql.c_str())) {
+            std::cerr << "创建数据库失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        // 选择数据库
+        if (mysql_select_db(conn, TEST_DB_NAME.c_str())) {
+            std::cerr << "选择数据库失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        // 创建测试表
+        std::string createTableSql = "CREATE TABLE IF NOT EXISTS " + TEST_TABLE_NAME + " ("
+                                    "id VARCHAR(50) PRIMARY KEY,"
+                                    "timestamp VARCHAR(50),"
+                                    "level VARCHAR(20),"
+                                    "source VARCHAR(50),"
+                                    "message TEXT)";
+        if (mysql_query(conn, createTableSql.c_str())) {
+            std::cerr << "创建表失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        // 清空表中的数据
+        std::string truncateTableSql = "TRUNCATE TABLE " + TEST_TABLE_NAME;
+        if (mysql_query(conn, truncateTableSql.c_str())) {
+            std::cerr << "清空表失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        mysql_close(conn);
+        std::cout << "测试数据库初始化成功" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "数据库初始化异常: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// 验证日志是否被正确存储
+bool VerifyLogStorage() {
+    try {
+        // 连接MySQL
+        MYSQL* conn = mysql_init(NULL);
+        if (!mysql_real_connect(conn, TEST_DB_HOST.c_str(), TEST_DB_USER.c_str(), 
+                               TEST_DB_PASSWORD.c_str(), TEST_DB_NAME.c_str(), 0, NULL, 0)) {
+            std::cerr << "连接MySQL失败: " << mysql_error(conn) << std::endl;
+            return false;
+        }
+        
+        // 查询存储的日志数量
+        std::string countSql = "SELECT COUNT(*) FROM " + TEST_TABLE_NAME;
+        if (mysql_query(conn, countSql.c_str())) {
+            std::cerr << "查询日志数量失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        MYSQL_RES* result = mysql_store_result(conn);
+        if (result == NULL) {
+            std::cerr << "获取查询结果失败: " << mysql_error(conn) << std::endl;
+            mysql_close(conn);
+            return false;
+        }
+        
+        MYSQL_ROW row = mysql_fetch_row(result);
+        int storedLogCount = std::stoi(row[0]);
+        mysql_free_result(result);
+        
+        // 检查各种日志级别的数量
+        std::vector<std::string> levels = {"INFO", "WARNING", "ERROR", "DEBUG"};
+        std::map<std::string, int> levelCounts;
+        
+        for (const auto& level : levels) {
+            std::string levelSql = "SELECT COUNT(*) FROM " + TEST_TABLE_NAME + " WHERE level = '" + level + "'";
+            if (mysql_query(conn, levelSql.c_str())) {
+                std::cerr << "查询" << level << "级别日志数量失败: " << mysql_error(conn) << std::endl;
+                continue;
+            }
+            
+            result = mysql_store_result(conn);
+            if (result == NULL) {
+                std::cerr << "获取查询结果失败: " << mysql_error(conn) << std::endl;
+                continue;
+            }
+            
+            row = mysql_fetch_row(result);
+            levelCounts[level] = std::stoi(row[0]);
+            mysql_free_result(result);
+        }
+        
+        mysql_close(conn);
+        
+        // 输出验证结果
+        std::cout << "验证结果:" << std::endl;
+        std::cout << "  - 发送的日志数量: " << LOG_COUNT << std::endl;
+        std::cout << "  - 处理的日志数量: " << processed_logs << std::endl;
+        std::cout << "  - 存储的日志数量: " << storedLogCount << std::endl;
+        
+        std::cout << "日志级别分布:" << std::endl;
+        for (const auto& pair : levelCounts) {
+            std::cout << "  - " << pair.first << ": " << pair.second << std::endl;
+        }
+        
+        // 计算成功率
+        double processRate = static_cast<double>(processed_logs) / LOG_COUNT * 100;
+        double storeRate = static_cast<double>(storedLogCount) / LOG_COUNT * 100;
+        
+        std::cout << "处理成功率: " << processRate << "%" << std::endl;
+        std::cout << "存储成功率: " << storeRate << "%" << std::endl;
+        
+        // 如果存储的日志数量大于等于处理的日志数量的90%，则认为测试成功
+        return storedLogCount >= processed_logs * 0.9;
+    } catch (const std::exception& e) {
+        std::cerr << "验证存储异常: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+int main() {
+    std::cout << "开始日志处理集成测试..." << std::endl;
+    
+    // 初始化测试数据库
+    if (!InitTestDatabase()) {
+        std::cerr << "测试数据库初始化失败，测试终止" << std::endl;
+        return 1;
+    }
+    
+    // 创建日志解析器
+    auto parser = std::make_shared<JsonLogParser>();
+    
+    // 创建日志存储
+    xumj::storage::MySQLConfig mysqlConfig;
+    mysqlConfig.host = TEST_DB_HOST;
+    mysqlConfig.username = TEST_DB_USER;
+    mysqlConfig.password = TEST_DB_PASSWORD;
+    mysqlConfig.database = TEST_DB_NAME;
+    
+    auto storage = std::make_shared<xumj::storage::MySQLStorage>(mysqlConfig);
+    if (!storage->Initialize()) {
+        std::cerr << "初始化日志存储失败，测试终止" << std::endl;
+        return 1;
+    }
+    
+    // 创建日志处理器
+    auto processor = std::make_shared<TestLogProcessor>(parser, storage);
+    
+    // 创建TCP服务器
+    auto server = std::make_shared<xumj::network::TcpServer>("TestServer", "0.0.0.0", TEST_PORT);
+    
+    // 设置回调函数
+    server->SetMessageCallback([&processor](uint64_t connectionId, const std::string& message, muduo::Timestamp timestamp) {
+        processor->Process(message);
+    });
+    
+    // 启动服务器
+    std::thread serverThread([&server]() {
+        std::cout << "启动TCP服务器..." << std::endl;
+        server->Start();
+    });
+    
+    // 生成测试日志
+    std::cout << "生成测试日志..." << std::endl;
+    auto logs = GenerateTestLogs(LOG_COUNT);
+    
+    // 启动客户端发送日志
+    std::thread clientThread([&logs]() {
+        RunTcpClient(logs);
+    });
+    
+    // 等待测试完成或超时
+    {
+        std::unique_lock<std::mutex> lock(mtx);
+        if (!test_complete) {
+            if (cv.wait_for(lock, std::chrono::seconds(TEST_TIMEOUT_SECONDS)) == std::cv_status::timeout) {
+                std::cout << "测试超时，已处理 " << processed_logs << " 条日志" << std::endl;
+            }
+        }
+    }
+    
+    // 停止服务器
+    std::cout << "停止TCP服务器..." << std::endl;
+    server->Stop();
+    
+    // 等待线程结束
+    if (serverThread.joinable()) {
+        serverThread.join();
+    }
+    if (clientThread.joinable()) {
+        clientThread.join();
+    }
+    
+    // 验证结果
+    bool success = VerifyLogStorage();
+    
+    if (success) {
+        std::cout << "集成测试成功!" << std::endl;
+        return 0;
+    } else {
+        std::cerr << "集成测试失败!" << std::endl;
+        return 1;
+    }
+} 

@@ -1,1 +1,0 @@
-bash: bin/log_generator_example: 没有那个文件或目录

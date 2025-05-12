@@ -334,49 +334,219 @@ bool MySQLStorage::Initialize() {
 }
 
 bool MySQLStorage::SaveLogEntry(const LogEntry& entry) {
-    auto conn = pool_->GetConnection();
-    
     try {
-        // 开始事务
-        conn->BeginTransaction();
-        
-        // 生成UUID作为日志ID（如果没有提供）
-        std::string id = entry.id.empty() ? GenerateUUID() : entry.id;
-        
-        // 插入日志条目
-        std::stringstream sql;
-        sql << "INSERT INTO log_entries (id, timestamp, level, source, message) VALUES ("
-            << "'" << conn->EscapeString(id) << "', "
-            << "'" << conn->EscapeString(entry.timestamp) << "', "
-            << "'" << conn->EscapeString(entry.level) << "', "
-            << "'" << conn->EscapeString(entry.source) << "', "
-            << "'" << conn->EscapeString(entry.message) << "')";
-        
-        conn->Execute(sql.str());
-        
-        // 插入自定义字段
-        for (const auto& field : entry.fields) {
-            std::stringstream field_sql;
-            field_sql << "INSERT INTO log_fields (log_id, field_name, field_value) VALUES ("
-                << "'" << conn->EscapeString(id) << "', "
-                << "'" << conn->EscapeString(field.first) << "', "
-                << "'" << conn->EscapeString(field.second) << "')";
-            
-            conn->Execute(field_sql.str());
+        // 首先检查连接是否可用
+        if (!TestConnection()) {
+            std::cerr << "保存日志条目失败: MySQL连接不可用" << std::endl;
+            // 尝试重新初始化
+            if (Initialize()) {
+                std::cout << "MySQL连接已重新初始化" << std::endl;
+            } else {
+                std::cerr << "MySQL连接重新初始化失败" << std::endl;
+                return false;
+            }
         }
         
-        // 提交事务
-        conn->Commit();
-        return true;
-    } catch (const MySQLStorageException& e) {
-        // 回滚事务
+        auto conn = pool_->GetConnection();
+        if (!conn) {
+            std::cerr << "保存日志条目失败: 无法获取数据库连接" << std::endl;
+            return false;
+        }
+        
         try {
-            conn->Rollback();
-        } catch (...) {
-            // 忽略回滚错误
+            // 开始事务
+            conn->BeginTransaction();
+            
+            // 生成UUID作为日志ID（如果没有提供）
+            std::string id = entry.id.empty() ? GenerateUUID() : entry.id;
+            
+            // 检查ID是否已存在
+            std::stringstream check_sql;
+            check_sql << "SELECT COUNT(*) as count FROM log_entries WHERE id = '"
+                      << conn->EscapeString(id) << "'";
+            
+            auto result = conn->Query(check_sql.str());
+            if (!result.empty() && result[0].find("count") != result[0].end()) {
+                int count = std::stoi(result[0]["count"]);
+                if (count > 0) {
+                    std::cout << "日志ID已存在，跳过插入: " << id << std::endl;
+                    conn->Rollback();
+                    return true; // 已存在视为成功
+                }
+            }
+            
+            // 预处理消息文本，处理特殊字符和过长内容
+            std::string safeMessage = entry.message;
+            // 截断过长消息
+            if (safeMessage.size() > 65535) {
+                safeMessage = safeMessage.substr(0, 65530) + "...";
+            }
+            
+            // 安全处理时间戳格式
+            std::string safeTimestamp = entry.timestamp;
+            if (safeTimestamp.empty()) {
+                // 使用当前时间
+                auto now = std::chrono::system_clock::now();
+                auto now_time_t = std::chrono::system_clock::to_time_t(now);
+                std::tm now_tm = *std::localtime(&now_time_t);
+                
+                std::stringstream ss;
+                ss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+                safeTimestamp = ss.str();
+            } else if (safeTimestamp.find("-") == std::string::npos || safeTimestamp.find(":") == std::string::npos) {
+                // 尝试将时间戳转换为标准格式
+                try {
+                    std::time_t timestamp = std::stoul(safeTimestamp);
+                    std::tm* timeinfo = std::localtime(&timestamp);
+                    char buffer[80];
+                    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+                    safeTimestamp = buffer;
+                } catch (...) {
+                    // 转换失败，使用当前时间
+                    auto now = std::chrono::system_clock::now();
+                    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+                    std::tm now_tm = *std::localtime(&now_time_t);
+                    
+                    std::stringstream ss;
+                    ss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+                    safeTimestamp = ss.str();
+                }
+            }
+            
+            // 限制级别和来源的长度
+            std::string safeLevel = entry.level.empty() ? "INFO" : entry.level;
+            if (safeLevel.size() > 20) {
+                safeLevel = safeLevel.substr(0, 20);
+            }
+            
+            std::string safeSource = entry.source.empty() ? "unknown" : entry.source;
+            if (safeSource.size() > 100) {
+                safeSource = safeSource.substr(0, 100);
+            }
+            
+            // 插入日志条目
+            std::string insert_sql = "INSERT INTO log_entries (id, timestamp, level, source, message) VALUES (?, ?, ?, ?, ?)";
+            
+            // 使用预处理语句
+            MYSQL_STMT* stmt = mysql_stmt_init(conn->GetNativeHandle());
+            if (!stmt) {
+                std::string error = "MySQL创建预处理语句失败: ";
+                error += mysql_error(conn->GetNativeHandle());
+                throw MySQLStorageException(error);
+            }
+            
+            if (mysql_stmt_prepare(stmt, insert_sql.c_str(), insert_sql.length()) != 0) {
+                std::string error = "MySQL预处理语句准备失败: ";
+                error += mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                throw MySQLStorageException(error);
+            }
+            
+            // 绑定参数
+            MYSQL_BIND bind[5];
+            memset(bind, 0, sizeof(bind));
+            
+            bind[0].buffer_type = MYSQL_TYPE_STRING;
+            bind[0].buffer = (void*)id.c_str();
+            bind[0].buffer_length = id.length();
+            
+            bind[1].buffer_type = MYSQL_TYPE_STRING;
+            bind[1].buffer = (void*)safeTimestamp.c_str();
+            bind[1].buffer_length = safeTimestamp.length();
+            
+            bind[2].buffer_type = MYSQL_TYPE_STRING;
+            bind[2].buffer = (void*)safeLevel.c_str();
+            bind[2].buffer_length = safeLevel.length();
+            
+            bind[3].buffer_type = MYSQL_TYPE_STRING;
+            bind[3].buffer = (void*)safeSource.c_str();
+            bind[3].buffer_length = safeSource.length();
+            
+            bind[4].buffer_type = MYSQL_TYPE_STRING;
+            bind[4].buffer = (void*)safeMessage.c_str();
+            bind[4].buffer_length = safeMessage.length();
+            
+            if (mysql_stmt_bind_param(stmt, bind) != 0) {
+                std::string error = "MySQL绑定参数失败: ";
+                error += mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                throw MySQLStorageException(error);
+            }
+            
+            if (mysql_stmt_execute(stmt) != 0) {
+                std::string error = "MySQL执行预处理语句失败: ";
+                error += mysql_stmt_error(stmt);
+                mysql_stmt_close(stmt);
+                throw MySQLStorageException(error);
+            }
+            
+            mysql_stmt_close(stmt);
+            
+            // 插入自定义字段
+            int fieldCount = 0;
+            const int maxFields = 20; // 限制字段数量
+            
+            for (const auto& field : entry.fields) {
+                if (fieldCount >= maxFields) {
+                    std::cout << "已达到最大字段数量限制 (" << maxFields << ")，忽略剩余字段" << std::endl;
+                    break;
+                }
+                
+                // 安全处理字段名和值
+                std::string safeFieldName = field.first;
+                if (safeFieldName.size() > 50) {
+                    safeFieldName = safeFieldName.substr(0, 50);
+                }
+                
+                std::string safeFieldValue = field.second;
+                if (safeFieldValue.size() > 65535) {
+                    safeFieldValue = safeFieldValue.substr(0, 65530) + "...";
+                }
+                
+                std::stringstream field_sql;
+                field_sql << "INSERT INTO log_fields (log_id, field_name, field_value) VALUES ("
+                    << "'" << conn->EscapeString(id) << "', "
+                    << "'" << conn->EscapeString(safeFieldName) << "', "
+                    << "'" << conn->EscapeString(safeFieldValue) << "')";
+                
+                try {
+                    conn->Execute(field_sql.str());
+                    fieldCount++;
+                } catch (const MySQLStorageException& e) {
+                    std::cerr << "插入字段失败 (" << safeFieldName << "): " << e.what() << std::endl;
+                    // 继续处理其他字段
+                }
+            }
+            
+            // 提交事务
+            conn->Commit();
+            return true;
+        } catch (const MySQLStorageException& e) {
+            // 回滚事务
+            try {
+                conn->Rollback();
+            } catch (...) {
+                // 忽略回滚错误
+            }
+            
+            std::cerr << "保存日志条目失败: " << e.what() << std::endl;
+            return false;
+        } catch (const std::exception& e) {
+            // 回滚事务
+            try {
+                conn->Rollback();
+            } catch (...) {
+                // 忽略回滚错误
+            }
+            
+            std::cerr << "保存日志条目时发生未知错误: " << e.what() << std::endl;
+            return false;
         }
-        
-        std::cerr << "保存日志条目失败: " << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "保存日志条目过程中发生异常: " << e.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cerr << "保存日志条目过程中发生未知异常" << std::endl;
         return false;
     }
 }

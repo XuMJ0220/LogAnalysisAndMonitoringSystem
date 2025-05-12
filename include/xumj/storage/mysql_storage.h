@@ -107,6 +107,12 @@ public:
      */
     bool Reconnect();
     
+    /**
+     * @brief 获取原生的MySQL连接句柄
+     * @return MySQL连接句柄
+     */
+    MYSQL* GetNativeHandle() { return mysql_; }
+    
 private:
     MYSQL* mysql_;          ///< MySQL连接句柄
     MySQLConfig config_;    ///< MySQL配置
@@ -151,6 +157,18 @@ public:
      */
     int GetPoolSize() const;
     
+    /**
+     * @brief 获取活跃连接数
+     * @return 活跃连接数
+     */
+    int GetActiveConnections() const;
+    
+    /**
+     * @brief 检查是否有可用连接
+     * @return 是否有可用连接
+     */
+    bool HasAvailableConnections() const;
+    
 private:
     MySQLConfig config_;                                    ///< MySQL配置
     std::vector<std::shared_ptr<MySQLConnection>> pool_;    ///< 连接池
@@ -161,6 +179,11 @@ private:
      * @return 新的MySQL连接
      */
     std::shared_ptr<MySQLConnection> CreateConnection();
+    
+    /**
+     * @brief 清理无效连接
+     */
+    void CleanupInvalidConnections();
 };
 
 /**

@@ -69,31 +69,18 @@ std::shared_ptr<LogCollector> setupLogCollector() {
 // 创建并配置日志处理器
 std::shared_ptr<LogProcessor> setupLogProcessor() {
     // 创建日志处理器配置
-    ProcessorConfig config;
-    
-    // 配置MySQL连接
-    std::stringstream mysqlConfigJson;
-    mysqlConfigJson << "{"
-                    << "\"host\": \"127.0.0.1\","
-                    << "\"port\": 3306,"
-                    << "\"username\": \"root\","
-                    << "\"password\": \"ytfhqqkso1\","
-                    << "\"database\": \"log_analysis\""
-                    << "}";
-    config.mysqlConfigJson = mysqlConfigJson.str();
+    LogProcessorConfig config;
+    config.workerThreads = 4;
+    config.queueSize = 1000;
+    config.enableRedisStorage = true;
+    config.enableMySQLStorage = true;
+    config.debug = true;  // 启用调试模式
     
     // 创建处理器实例
     auto processor = std::make_shared<LogProcessor>(config);
     
     // 添加JSON日志解析器
-    std::unordered_map<std::string, std::string> fieldMapping = {
-        {"timestamp", "timestamp"},
-        {"level", "level"},
-        {"message", "message"},
-        {"type", "type"},
-        {"source", "source"}
-    };
-    processor->AddParser(std::make_shared<JsonLogParser>("JSONParser", fieldMapping));
+    processor->AddLogParser(std::make_shared<JsonLogParser>());
     
     // 启动处理器 - 这会自动初始化TCP服务器
     bool success = processor->Start();
@@ -178,34 +165,12 @@ void setupServer(
     std::shared_ptr<LogAnalyzer> /* analyzer */,
     std::shared_ptr<AlertManager> /* alertManager */) {
 
-    // 我们不再在这里创建新的TCP服务器，而是复用LogProcessor中创建的服务器
-    std::cout << "TCP服务器已在LogProcessor中初始化" << std::endl;
-    
-    // 获取LogProcessor中的TCP服务器，并设置回调用于调试
-    const auto& tcpServer = processor->GetTcpServer();
-    if (tcpServer) {
-        // 设置额外的回调以便于调试
-        tcpServer->SetConnectionCallback([](uint64_t connectionId, const std::string& clientAddr, bool connected) {
-            if (connected) {
-                std::cout << "[DEBUG] 新连接建立: ID=" << connectionId << ", 客户端=" << clientAddr << std::endl;
-            } else {
-                std::cout << "[DEBUG] 连接断开: ID=" << connectionId << ", 客户端=" << clientAddr << std::endl;
-            }
-        });
-        
-        tcpServer->SetMessageCallback([](uint64_t connectionId, const std::string& message, muduo::Timestamp) {
-            std::cout << "[DEBUG] 收到消息: 连接ID=" << connectionId 
-                      << ", 长度=" << message.size() 
-                      << ", 预览=" << (message.size() > 30 ? message.substr(0, 30) + "..." : message)
-                      << std::endl;
-        });
-    } else {
-        std::cerr << "警告: LogProcessor中没有初始化TCP服务器" << std::endl;
-    }
+    // 我们不再需要获取TcpServer实例，因为它已经在LogProcessor内部处理
+    std::cout << "TCP服务器已在LogProcessor中初始化，端口：" << processor->GetConfig().tcpPort << std::endl;
 }
 
 // 示例客户端，用于生成和发送日志
-void runClient() {
+void runClient(std::shared_ptr<LogProcessor> processor) {
     // 创建TCP客户端
     TcpClient client("LogClient", "127.0.0.1", 8001, true);
     
@@ -258,6 +223,7 @@ void runClient() {
                 "\"memory_usage\": " + std::to_string(70 + index % 30) + ", " +
                 "\"disk_usage\": " + std::to_string(50 + index % 50) + ", " +
                 "\"message\": \"系统资源使用监控\", " +
+                "\"source\": \"resource_monitor\", " +
                 "\"server\": \"server" + std::to_string(1 + index % 5) + "\"}";
                 
         } else if (index % 5 == 1) {
@@ -268,6 +234,7 @@ void runClient() {
                 "\"query_id\": \"Q" + std::to_string(index) + "\", " +
                 "\"rows_examined\": " + std::to_string(100 * index) + ", " +
                 "\"message\": \"数据库查询性能\", " +
+                "\"source\": \"database\", " +
                 "\"database\": \"users\"}";
                 
         } else if (index % 5 == 2) {
@@ -279,6 +246,7 @@ void runClient() {
                 "\"action\": \"login\", " +
                 "\"status\": \"" + (success ? "success" : "failed") + "\", " +
                 "\"reason\": \"" + (success ? "正常登录" : "密码错误") + "\", " +
+                "\"source\": \"auth_service\", " +
                 "\"ip_address\": \"192.168.1." + std::to_string(index % 256) + "\", " +
                 "\"message\": \"用户" + (success ? "登录成功" : "登录失败") + "\"}";
                 
@@ -288,6 +256,7 @@ void runClient() {
                 getCurrentTimeStr() + "\", \"level\": \"ERROR\", " +
                 "\"error_code\": \"E" + std::to_string(1000 + index) + "\", " +
                 "\"component\": \"payment_service\", " +
+                "\"source\": \"payment_service\", " +
                 "\"message\": \"支付处理失败: 超时等待第三方响应\", " +
                 "\"transaction_id\": \"T" + std::to_string(index) + "\"}";
                 
@@ -298,13 +267,24 @@ void runClient() {
                 "\"module\": \"cart_service\", " +
                 "\"session_id\": \"session-" + std::to_string(1000 + index) + "\", " +
                 "\"message\": \"用户添加商品到购物车\", " +
+                "\"source\": \"cart_service\", " +
                 "\"user_id\": \"user" + std::to_string(index) + "\", " +
                 "\"product_id\": \"product" + std::to_string(index * 5) + "\"}";
         }
         
         // 发送日志
         std::cout << "发送日志 #" << index << ": " << logMessage.substr(0, 50) << "..." << std::endl;
-        client.Send(logMessage);
+        client.Send(logMessage + "\r\n");  // 添加换行符，确保消息能被正确识别
+        
+        // 也直接处理这个JSON字符串
+        if (processor) {
+            bool success = processor->ProcessJsonString(logMessage);
+            if (success) {
+                std::cout << "直接处理日志 #" << index << " 成功" << std::endl;
+            } else {
+                std::cerr << "直接处理日志 #" << index << " 失败" << std::endl;
+            }
+        }
         
         // 等待一段时间
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -319,109 +299,89 @@ void runClient() {
 int main() {
     std::cout << "启动分布式实时日志分析与监控系统示例..." << std::endl;
     
-    // 注册信号处理器
+    // 注册信号处理
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     
-    // 设置总体运行超时（60秒后自动退出）
-    std::thread timeoutThread([]() {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
-        std::cout << "程序运行超时（60秒），准备退出..." << std::endl;
-        running = false;
-    });
-    timeoutThread.detach();  // 分离线程以允许后台运行
+    // 设置存储
+    auto storage = setupStorage();
     
+    // 临时测试MySQL连接
     try {
-        // 初始化各个组件
-        auto logCollector = setupLogCollector();
-        if (!logCollector) {
-            std::cerr << "初始化日志收集器失败" << std::endl;
-            return 1;
-        }
-        
-        auto storageFactory = setupStorage();
-        if (!storageFactory) {
-            std::cerr << "初始化存储失败" << std::endl;
-            return 1;
-        }
-        
-        auto alertManager = setupAlertManager();
-        if (!alertManager) {
-            std::cerr << "初始化告警管理器失败" << std::endl;
-            return 1;
-        }
-        
-        // 启动告警管理器
-        if (!alertManager->Start()) {
-            std::cerr << "启动告警管理器失败" << std::endl;
-            return 1;
-        }
-        
-        auto logAnalyzer = setupLogAnalyzer();
-        if (!logAnalyzer) {
-            std::cerr << "初始化日志分析器失败" << std::endl;
-            return 1;
-        }
-        
-        // 创建处理器（必须在创建分析器和存储之后）
-        auto logProcessor = setupLogProcessor();
-        if (!logProcessor) {
-            std::cerr << "初始化日志处理器失败" << std::endl;
-            return 1;
-        }
-        
-        // 只需调用一次setupServer，但我们不使用它返回的服务器
-        setupServer(logProcessor, logAnalyzer, alertManager);
-        
-        std::cout << "TCP服务器已启动，监听端口: 8001" << std::endl;
-        
-        // 启动客户端线程
-        std::thread clientThread(runClient);
-        
-        // 设置一个短暂的等待时间，允许客户端初始化
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-        
-        // 主循环，最多运行30秒
-        std::cout << "系统已启动，按Ctrl+C停止..." << std::endl;
-        auto startTime = std::chrono::steady_clock::now();
-        
-        while (running) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        auto mysqlStorage = storage->GetStorage<xumj::storage::MySQLStorage>("mysql");
+        if (mysqlStorage) {
+            std::cout << "测试MySQL存储..." << std::endl;
+            xumj::storage::MySQLStorage::LogEntry testEntry;
+            testEntry.id = "test-log-" + std::to_string(std::time(nullptr));
+            testEntry.timestamp = getCurrentTimeStr();
+            testEntry.level = "INFO";
+            testEntry.source = "complete_system_example";
+            testEntry.message = "这是一条测试日志消息";
             
-            // 检查是否运行超过30秒
-            auto currentTime = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime).count() > 30) {
-                std::cout << "运行时间达到30秒，系统将自动退出..." << std::endl;
-                running = false;
+            bool success = mysqlStorage->SaveLogEntry(testEntry);
+            if (success) {
+                std::cout << "MySQL测试日志写入成功: ID=" << testEntry.id << std::endl;
+            } else {
+                std::cerr << "MySQL测试日志写入失败" << std::endl;
             }
-            
-            // 输出系统还活着的标志
-            std::cout << "." << std::flush;
+        } else {
+            std::cerr << "无法获取MySQL存储实例" << std::endl;
         }
-        
-        // 等待客户端线程结束，但设置超时
-        if (clientThread.joinable()) {
-            // 给客户端线程5秒时间来完成
-            auto clientRunning = std::async(std::launch::async, [&clientThread]() {
-                clientThread.join();
-                return true;
-            });
-            
-            // 如果5秒内没有结束，继续执行
-            if (clientRunning.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
-                std::cerr << "客户端线程未能在超时时间内结束" << std::endl;
-            }
-        }
-        
-        // 停止告警管理器
-        alertManager->Stop();
-        std::cout << "告警管理器已停止" << std::endl;
-        
     } catch (const std::exception& e) {
-        std::cerr << "错误: " << e.what() << std::endl;
+        std::cerr << "MySQL测试异常: " << e.what() << std::endl;
+    }
+    
+    // 设置告警
+    auto alertManager = setupAlertManager();
+    
+    // 设置日志分析
+    auto analyzer = setupLogAnalyzer();
+    
+    // 设置日志处理
+    auto processor = setupLogProcessor();
+    if (!processor) {
+        std::cerr << "日志处理器初始化失败，系统退出" << std::endl;
         return 1;
     }
     
-    std::cout << "系统已正常退出" << std::endl;
+    // 设置TCP服务器
+    setupServer(processor, analyzer, alertManager);
+    
+    // 设置日志收集
+    auto collector = setupLogCollector();
+    
+    // 输出已启动的端口信息
+    std::cout << "TCP服务器已启动，监听端口: " << processor->GetConfig().tcpPort << std::endl;
+    
+    // 启动客户端线程
+    std::thread clientThread(runClient, processor);
+    
+    std::cout << "系统已启动，按Ctrl+C停止..." << std::endl;
+    
+    // 等待退出信号
+    int runTime = 0;
+    while (running && runTime < 30) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        runTime++;
+        
+        // 每5秒输出一个点，表示系统仍在运行
+        if (runTime % 5 == 0) {
+            std::cout << "." << std::flush;
+        }
+    }
+    
+    if (runTime >= 30) {
+        std::cout << "\n运行时间达到30秒，系统将自动退出..." << std::endl;
+        running = false;
+    }
+    
+    // 等待客户端线程结束
+    if (clientThread.joinable()) {
+        clientThread.join();
+    }
+    
+    // 停止处理器
+    processor->Stop();
+    
     return 0;
 } 
