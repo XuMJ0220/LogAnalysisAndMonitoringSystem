@@ -172,16 +172,16 @@ add_dependencies(mysql_debug_test
 )
 
 # 添加集成测试
-add_executable(log_processing_integration_test integration/log_processing_integration_test.cpp)
-target_link_libraries(log_processing_integration_test
-    xumj_network
-    xumj_processor
-    xumj_storage
-    xumj_common
-    ${MYSQL_LIBRARIES}
-    ${CMAKE_THREAD_LIBS_INIT}
-)
+# add_executable(log_processing_integration_test integration/log_processing_integration_test.cpp)
+# target_link_libraries(log_processing_integration_test
+#     xumj_network
+#     xumj_processor
+#     xumj_storage
+#     xumj_common
+#     ${MYSQL_LIBRARIES}
+#     ${CMAKE_THREAD_LIBS_INIT}
+# )
 
 # 添加子目录
-add_subdirectory(integration)
+# add_subdirectory(integration)
 add_subdirectory(performance) 

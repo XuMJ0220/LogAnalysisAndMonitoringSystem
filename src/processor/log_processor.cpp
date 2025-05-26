@@ -4,6 +4,7 @@
 #include <sstream>
 #include <regex>
 #include <iomanip>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include <zlib.h>
 #include <uuid/uuid.h>
@@ -33,10 +34,12 @@ std::string TimestampToString(const std::chrono::system_clock::time_point& tp) {
 bool JsonLogParser::Parse(const LogData& logData, analyzer::LogRecord& record) {
     using json = nlohmann::json;
     
+    if (config_.debug) {
     std::cout << "JsonLogParser: 尝试解析日志数据，ID=" << logData.id << std::endl;
     std::cout << "  源: " << logData.source << std::endl;
     std::cout << "  消息内容: " << (logData.message.length() > 50 ? logData.message.substr(0, 47) + "..." : logData.message) << std::endl;
     std::cout << "  元数据数量: " << logData.metadata.size() << std::endl;
+    }
     
     // 设置基本字段
     record.id = logData.id;
@@ -49,14 +52,27 @@ bool JsonLogParser::Parse(const LogData& logData, analyzer::LogRecord& record) {
     bool hasMetaMessage = logData.metadata.count("message") > 0;
     bool isJsonFormat = logData.metadata.count("is_json") > 0 && logData.metadata.at("is_json") == "true";
     
+    // 尝试检测JSON格式（如果没有明确指定）
+    if (!isJsonFormat && logData.message.length() > 1 && 
+        logData.message[0] == '{' && logData.message[logData.message.length()-1] == '}') {
+        isJsonFormat = true;
+        if (config_.debug) {
+            std::cout << "  通过格式检测判断为JSON" << std::endl;
+        }
+    }
+    
     if (hasMetaTimestamp) {
         record.timestamp = logData.metadata.at("timestamp");
+        if (config_.debug) {
         std::cout << "  使用元数据中的时间戳: " << record.timestamp << std::endl;
+        }
     }
     
     if (hasMetaLevel) {
         record.level = logData.metadata.at("level");
+        if (config_.debug) {
         std::cout << "  使用元数据中的级别: " << record.level << std::endl;
+        }
     }
     
     // 获取日志内容
@@ -65,49 +81,71 @@ bool JsonLogParser::Parse(const LogData& logData, analyzer::LogRecord& record) {
     try {
         // 解析JSON
         if (!isJsonFormat) {
+            if (config_.debug) {
             std::cout << "  不是JSON格式，跳过解析" << std::endl;
+            }
             return false;
         }
         
+        if (config_.debug) {
         std::cout << "  尝试解析JSON: " << (content.length() > 50 ? content.substr(0, 47) + "..." : content) << std::endl;
+        }
+        
         json j = json::parse(content);
+        
+        if (config_.debug) {
         std::cout << "  JSON解析成功" << std::endl;
+        }
         
         // 提取常见字段
         if (j.contains("timestamp") && j["timestamp"].is_string() && !hasMetaTimestamp) {
             record.timestamp = j["timestamp"].get<std::string>();
+            if (config_.debug) {
             std::cout << "  从JSON中提取时间戳: " << record.timestamp << std::endl;
+            }
         }
         
         if (j.contains("level") && j["level"].is_string() && !hasMetaLevel) {
             record.level = j["level"].get<std::string>();
+            if (config_.debug) {
             std::cout << "  从JSON中提取级别: " << record.level << std::endl;
+            }
         }
         
         if (j.contains("message") && j["message"].is_string() && !hasMetaMessage) {
             record.message = j["message"].get<std::string>();
+            if (config_.debug) {
             std::cout << "  从JSON中提取消息: " << record.message << std::endl;
+            }
         }
         
         if (j.contains("source") && j["source"].is_string() && record.source.empty()) {
             record.source = j["source"].get<std::string>();
+            if (config_.debug) {
             std::cout << "  从JSON中提取源: " << record.source << std::endl;
+            }
         }
         
         // 确保基本字段存在
         if (record.level.empty()) {
             record.level = "INFO";  // 默认级别
+            if (config_.debug) {
             std::cout << "  级别为空，设置默认级别: INFO" << std::endl;
+            }
         }
         
         if (record.message.empty()) {
             if (hasMetaMessage) {
                 record.message = logData.metadata.at("message");
+                if (config_.debug) {
                 std::cout << "  使用元数据中的消息: " << (record.message.length() > 50 ? record.message.substr(0, 47) + "..." : record.message) << std::endl;
+                }
             } else {
                 // 如果消息为空，使用内容概要作为消息
                 record.message = "JSON日志: " + (content.size() > 50 ? content.substr(0, 50) + "..." : content);
+                if (config_.debug) {
                 std::cout << "  消息为空，使用内容概要: " << (record.message.length() > 50 ? record.message.substr(0, 47) + "..." : record.message) << std::endl;
+                }
             }
         }
         
@@ -119,27 +157,39 @@ bool JsonLogParser::Parse(const LogData& logData, analyzer::LogRecord& record) {
                     std::string fieldName = "json." + it.key();
                     if (it.value().is_string()) {
                         record.fields[fieldName] = it.value().get<std::string>();
+                        if (config_.debug) {
                         std::cout << "  添加字段 " << fieldName << " = " << (record.fields[fieldName].length() > 30 ? record.fields[fieldName].substr(0, 27) + "..." : record.fields[fieldName]) << std::endl;
+                        }
                     } else {
                         record.fields[fieldName] = it.value().dump();
+                        if (config_.debug) {
                         std::cout << "  添加非字符串字段 " << fieldName << " = " << (record.fields[fieldName].length() > 30 ? record.fields[fieldName].substr(0, 27) + "..." : record.fields[fieldName]) << std::endl;
+                        }
                     }
                 } catch (...) {
                     record.fields["json." + it.key()] = "无法转换的值类型";
+                    if (config_.debug) {
                     std::cout << "  添加字段时出错 " << "json." + it.key() << " = 无法转换的值类型" << std::endl;
+                    }
                 }
             }
         }
         
+        if (config_.debug) {
         std::cout << "JsonLogParser: 解析成功" << std::endl;
+        }
         return true;
     } catch (const json::exception& e) {
         // 处理JSON解析错误
+        if (config_.debug) {
         std::cout << "  JSON解析异常: " << e.what() << std::endl;
+        }
         return false;
     } catch (const std::exception& e) {
         // 处理其他解析错误
+        if (config_.debug) {
         std::cout << "  解析异常: " << e.what() << std::endl;
+        }
         return false;
     }
 }
@@ -150,42 +200,28 @@ LogProcessor::LogProcessor(const LogProcessorConfig& config)
       running_(false),
       redisStorage_(nullptr),
       mysqlStorage_(nullptr),
-      analyzer_(nullptr) {
+      lastMetricsFlush_(std::chrono::steady_clock::now()) {
+    
+    // 初始化指标
+    metrics_.Reset();
     
     // 初始化存储
     if (config_.enableRedisStorage) {
-        try {
-            auto redisConfig = storage::RedisConfig();
-            redisConfig.host = "127.0.0.1";
-            redisConfig.port = 6379;
-            redisStorage_ = std::make_shared<storage::RedisStorage>(redisConfig);
-            std::cout << "Redis存储初始化成功" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Redis存储初始化失败: " << e.what() << std::endl;
+        redisStorage_ = storage::StorageFactory::CreateRedisStorage(config_.redisConfig);
+        if (!redisStorage_) {
+            throw std::runtime_error("Failed to initialize Redis storage");
         }
     }
     
     if (config_.enableMySQLStorage) {
-        try {
-            auto mysqlConfig = storage::MySQLConfig();
-            mysqlConfig.host = "127.0.0.1";
-            mysqlConfig.port = 3306;
-            mysqlConfig.username = "root";
-            mysqlConfig.password = "ytfhqqkso1";
-            mysqlConfig.database = "log_analysis";
-            mysqlStorage_ = std::make_shared<storage::MySQLStorage>(mysqlConfig);
-            if (mysqlStorage_->Initialize()) {
-                std::cout << "MySQL存储初始化成功" << std::endl;
-            } else {
-                std::cerr << "MySQL存储表结构初始化失败" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "MySQL存储初始化失败: " << e.what() << std::endl;
+        mysqlStorage_ = storage::StorageFactory::CreateMySQLStorage(config_.mysqlConfig);
+        if (!mysqlStorage_) {
+            throw std::runtime_error("Failed to initialize MySQL storage");
         }
     }
     
-    // 注册默认解析器
-    AddLogParser(std::make_shared<JsonLogParser>());
+    // 初始化线程池
+    threadPool_ = std::make_unique<common::ThreadPool>(config_.workerThreads);
 }
 
 LogProcessor::~LogProcessor() {
@@ -212,11 +248,45 @@ bool LogProcessor::Start() {
         analyzer_->Start();
     }
     
-    // 启动工作线程
+    // 启动处理
     running_ = true;
     
+    // 启动工作线程
     for (int i = 0; i < config_.workerThreads; ++i) {
-        workers_.emplace_back(&LogProcessor::WorkerThread, this);
+        threadPool_->Submit([this]() {
+            while (running_) {
+                LogData data;
+                bool hasData = false;
+                
+                // 获取一个任务
+                {
+                    std::unique_lock<std::mutex> lock(queueMutex_);
+                    
+                    // 等待任务或停止信号
+                    queueCondVar_.wait(lock, [this] {
+                        return !running_ || !logQueue_.empty();
+                    });
+                    
+                    // 检查是否应该退出
+                    if (!running_ && logQueue_.empty()) {
+                        break;
+                    }
+                    
+                    // 获取任务
+                    if (!logQueue_.empty()) {
+                        data = std::move(logQueue_.front());
+                        logQueue_.pop();
+                        dataCount_--;
+                        hasData = true;
+                    }
+                }
+                
+                // 处理任务
+                if (hasData) {
+                    ProcessLogData(std::move(data));
+                }
+            }
+        });
     }
     
     return true;
@@ -231,13 +301,11 @@ void LogProcessor::Stop() {
     running_ = false;
     queueCondVar_.notify_all();
     
-    // 等待线程结束
-    for (auto& worker : workers_) {
-        if (worker.joinable()) {
-            worker.join();
-        }
+    // 等待线程池中的任务完成
+    if (threadPool_) {
+        threadPool_->WaitForTasks(5000);  // 等待最多5秒
+        threadPool_.reset();  // 释放线程池，这会触发析构函数
     }
-    workers_.clear();
     
     // 停止分析器
     if (analyzer_) {
@@ -289,41 +357,6 @@ void LogProcessor::AddLogParser(std::shared_ptr<LogParser> parser) {
 size_t LogProcessor::GetPendingCount() const {
     std::lock_guard<std::mutex> lock(queueMutex_);
     return dataCount_;
-}
-
-void LogProcessor::WorkerThread() {
-    while (running_) {
-        LogData data;
-        bool hasData = false;
-        
-        // 获取一个任务
-        {
-            std::unique_lock<std::mutex> lock(queueMutex_);
-            
-            // 等待任务或停止信号
-            queueCondVar_.wait(lock, [this] {
-                return !running_ || !logQueue_.empty();
-            });
-            
-            // 检查是否应该退出
-            if (!running_ && logQueue_.empty()) {
-                break;
-            }
-            
-            // 获取任务
-            if (!logQueue_.empty()) {
-                data = std::move(logQueue_.front());
-                logQueue_.pop();
-                dataCount_--;
-                hasData = true;
-            }
-        }
-        
-        // 处理任务
-        if (hasData) {
-            ProcessLogData(std::move(data));
-        }
-    }
 }
 
 bool LogProcessor::InitializeTcpServer() {
@@ -587,135 +620,132 @@ void LogProcessor::HandleTcpMessage(const TcpConnectionPtr& conn, const std::str
 }
 
 void LogProcessor::ProcessLogData(LogData logData) {
-    if (config_.debug) {
-        std::cout << "开始处理日志数据: ID=" << logData.id << ", 来源=" << logData.source << std::endl;
-    }
+    auto startTime = std::chrono::steady_clock::now();
+    bool success = false;
     
-    // 尝试解析日志数据
-    bool parsed = false;
-    analyzer::LogRecord record;
-    
-    // 设置基本字段
-    record.id = logData.id.empty() ? GenerateUUID() : logData.id;
-    record.timestamp = TimestampToString(logData.timestamp);
-    record.source = logData.source;
-    
+    // 尝试使用所有解析器解析日志
     {
         std::lock_guard<std::mutex> lock(parsersMutex_);
-        
-        if (config_.debug) {
-            std::cout << "尝试解析日志: 解析器数量=" << parsers_.size() << std::endl;
-        }
-        
-        for (auto& parser : parsers_) {
-            try {
-                if (config_.debug) {
-                    std::cout << "使用解析器 " << parser->GetType() << " 解析..." << std::endl;
+        for (const auto& parser : parsers_) {
+            analyzer::LogRecord record;
+            auto parserStartTime = std::chrono::steady_clock::now();
+            
+            if (parser->Parse(logData, record)) {
+                success = true;
+                
+                // 更新解析器指标
+                auto parserEndTime = std::chrono::steady_clock::now();
+                auto parserProcessTime = std::chrono::duration_cast<std::chrono::microseconds>(
+                    parserEndTime - parserStartTime);
+                UpdateMetrics(parser->GetName(), parserProcessTime, true);
+                
+                // 存储日志记录
+                if (config_.enableRedisStorage && redisStorage_) {
+                    StoreRedisLog(record);
                 }
                 
-                // 尝试解析
-                if (parser->Parse(logData, record)) {
-                    parsed = true;
-                    
-                    if (config_.debug) {
-                        std::cout << "解析成功，解析器=" << parser->GetType() << std::endl;
-                    }
-                    
-                    break;
+                if (config_.enableMySQLStorage && mysqlStorage_) {
+                    StoreMySQLLog(record);
                 }
-            } catch (const std::exception& e) {
-                std::cerr << "解析器 " << parser->GetType() << " 解析失败: " << e.what() << std::endl;
-            } catch (...) {
-                std::cerr << "解析器 " << parser->GetType() << " 解析时发生未知异常" << std::endl;
+                
+                // 分析日志
+                if (analyzer_) {
+                    analyzer_->SubmitRecord(record);
+                }
+                
+                break;
+            } else {
+                // 更新解析器失败指标
+                auto parserEndTime = std::chrono::steady_clock::now();
+                auto parserProcessTime = std::chrono::duration_cast<std::chrono::microseconds>(
+                    parserEndTime - parserStartTime);
+                UpdateMetrics(parser->GetName(), parserProcessTime, false);
             }
         }
     }
     
-    // 如果没有成功解析，使用默认值
-    if (!parsed) {
-        if (config_.debug) {
-            std::cout << "没有合适的解析器，使用默认值" << std::endl;
+    // 更新总体指标
+    auto endTime = std::chrono::steady_clock::now();
+    auto totalTime = std::chrono::duration_cast<std::chrono::microseconds>(
+        endTime - startTime);
+    UpdateMetrics("total", totalTime, success);
+    
+    // 检查是否需要刷新指标
+    if (config_.enableMetrics) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - lastMetricsFlush_).count();
+            
+        if (elapsed >= config_.metricsFlushInterval) {
+            ExportMetrics();
+            lastMetricsFlush_ = now;
         }
+    }
+}
+
+void LogProcessor::UpdateMetrics(const std::string& parserName,
+                               const std::chrono::microseconds& processTime,
+                               bool success) {
+    if (!config_.enableMetrics) {
+        return;
+    }
+    
+    // 更新总记录数
+    metrics_.totalRecords++;
+    
+    // 更新错误记录数
+    if (!success) {
+        metrics_.errorRecords++;
+    }
+    
+    // 更新总处理时间
+    metrics_.totalProcessTime += processTime.count();
+    
+    // 更新解析器指标
+    auto& parserMetrics = metrics_.parserMetrics[parserName];
+    if (success) {
+        parserMetrics.successCount++;
+    } else {
+        parserMetrics.failureCount++;
+    }
+    parserMetrics.totalTime += processTime.count();
+}
+
+void LogProcessor::ExportMetrics() {
+    if (!config_.enableMetrics || config_.metricsOutputPath.empty()) {
+        return;
+    }
+    
+    std::ofstream file(config_.metricsOutputPath, std::ios::app);
+    if (!file.is_open()) {
+        std::cerr << "无法打开指标输出文件: " << config_.metricsOutputPath << std::endl;
+        return;
+    }
+    
+    auto now = std::chrono::system_clock::now();
+    auto timeStr = TimestampToString(now);
+    
+    file << "\n=== 指标导出时间: " << timeStr << " ===\n";
+    file << "总处理记录数: " << metrics_.totalRecords << "\n";
+    file << "错误记录数: " << metrics_.errorRecords << "\n";
+    file << "总处理时间(微秒): " << metrics_.totalProcessTime << "\n";
+    
+    file << "\n解析器指标:\n";
+    for (const auto& [name, parserMetrics] : metrics_.parserMetrics) {
+        file << "解析器: " << name << "\n";
+        file << "  成功次数: " << parserMetrics.successCount << "\n";
+        file << "  失败次数: " << parserMetrics.failureCount << "\n";
+        file << "  总处理时间(微秒): " << parserMetrics.totalTime << "\n";
         
-        record.level = "INFO";
-        record.message = logData.message.empty() ? "Empty log message" : logData.message;
-        
-        // 添加原始消息作为字段
-        record.fields["raw_message"] = logData.message;
-    }
-    
-    // 确保记录有ID
-    if (record.id.empty()) {
-        record.id = GenerateUUID();
-    }
-    
-    if (config_.debug) {
-        std::cout << "日志记录已准备: ID=" << record.id 
-                  << ", 级别=" << record.level
-                  << ", 消息=" << (record.message.length() > 30 ? record.message.substr(0, 27) + "..." : record.message)
-                  << std::endl;
-    }
-    
-    // 存储到Redis
-    if (redisStorage_) {
-        try {
-            if (config_.debug) {
-                std::cout << "存储日志到Redis..." << std::endl;
-            }
-            
-            StoreRedisLog(record);
-            
-            if (config_.debug) {
-                std::cout << "Redis存储完成" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "存储到Redis失败: " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "存储到Redis时发生未知异常" << std::endl;
+        if (parserMetrics.successCount + parserMetrics.failureCount > 0) {
+            double successRate = static_cast<double>(parserMetrics.successCount) / 
+                (parserMetrics.successCount + parserMetrics.failureCount) * 100;
+            file << "  成功率: " << std::fixed << std::setprecision(2) << successRate << "%\n";
         }
     }
+    file << "==================\n";
     
-    // 存储到MySQL
-    if (mysqlStorage_) {
-        try {
-            if (config_.debug) {
-                std::cout << "存储日志到MySQL..." << std::endl;
-            }
-            
-            StoreMySQLLog(record);
-            
-            if (config_.debug) {
-                std::cout << "MySQL存储完成" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "存储到MySQL失败: " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "存储到MySQL时发生未知异常" << std::endl;
-        }
-    }
-    
-    // 发送到分析器
-    if (analyzer_ && parsed) {
-        try {
-            if (config_.debug) {
-                std::cout << "发送日志到分析器..." << std::endl;
-            }
-            
-            analyzer_->SubmitRecord(record);
-            
-            if (config_.debug) {
-                std::cout << "日志已发送到分析器" << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "发送到分析器失败: " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "发送到分析器时发生未知异常" << std::endl;
-        }
-    }
-    
-    if (config_.debug) {
-        std::cout << "日志处理完成: ID=" << record.id << std::endl;
-    }
+    file.close();
 }
 
 void LogProcessor::StoreRedisLog(const analyzer::LogRecord& record) {
@@ -930,6 +960,16 @@ bool LogProcessor::ProcessJsonString(const std::string& jsonStr) {
         std::cerr << "处理JSON字符串异常: " << e.what() << std::endl;
         return false;
     }
+}
+
+// 获取当前指标
+const ProcessorMetrics& LogProcessor::GetMetrics() const {
+    return metrics_;
+}
+
+// 重置指标
+void LogProcessor::ResetMetrics() {
+    metrics_.Reset();
 }
 
 } // namespace processor

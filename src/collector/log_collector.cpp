@@ -213,6 +213,7 @@ bool LogCollector::SendLogBatch(std::vector<LogEntry>& logs) {
     // 在此示例中，我们只是简单地打印日志
     
     try {
+        size_t log_size = logs.size();
         for (auto it = logs.begin(); it != logs.end();) {
             std::cout << "[" << TimestampToString(it->GetTimestamp()) << "] "
                       << "[" << LogLevelToString(it->GetLevel()) << "] "
@@ -222,7 +223,7 @@ bool LogCollector::SendLogBatch(std::vector<LogEntry>& logs) {
         
         // 调用成功回调
         if (sendCallback_) {
-            sendCallback_(logs.size());
+            sendCallback_(log_size -  logs.size());
         }
         
         return true;

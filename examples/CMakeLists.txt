@@ -13,7 +13,7 @@ endif()
 
 # 日志收集器示例
 add_executable(log_collector_example
-    log_collector_example.cpp
+    legacy/log_collector_example.cpp
 )
 
 # 设置编译选项
@@ -33,71 +33,34 @@ target_link_libraries(log_collector_example
     -lz
 )
 
-# 网络通信示例
-add_executable(network_example
-    network_example.cpp
+# 增强版日志收集器示例
+add_executable(collector_enhanced_example
+    collector_enhanced_example.cpp
 )
 
 # 设置编译选项
-target_compile_options(network_example PRIVATE -Wall -Wextra)
+target_compile_options(collector_enhanced_example PRIVATE -Wall -Wextra)
 
 # 添加包含目录
-target_include_directories(network_example PRIVATE
+target_include_directories(collector_enhanced_example PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 
 # 链接依赖库
-target_link_libraries(network_example
-    network
+target_link_libraries(collector_enhanced_example
+    collector
     common
-    muduo_net
-    muduo_base
+    ${ZLIB_LIBRARIES}
     pthread
-)
-
-# 存储示例
-add_executable(storage_example
-    storage_example.cpp
-)
-
-# 设置编译选项
-target_compile_options(storage_example PRIVATE -Wall -Wextra)
-
-# 添加包含目录
-target_include_directories(storage_example PRIVATE
-    ${CMAKE_SOURCE_DIR}
-)
-
-# 链接依赖库
-target_link_libraries(storage_example
-    storage
-    common
-    nlohmann_json::nlohmann_json
-    ${REDIS_LIBRARIES}
-    ${MYSQL_LIBRARIES}
+    -lz
 )
 
 # 存储工厂示例
-add_executable(storage_factory_example
-    storage_factory_example.cpp
-)
-
-# 设置编译选项
+add_executable(storage_factory_example storage_factory_example.cpp)
 target_compile_options(storage_factory_example PRIVATE -Wall -Wextra)
-
-# 添加包含目录
-target_include_directories(storage_factory_example PRIVATE
-    ${CMAKE_SOURCE_DIR}
-)
-
-# 链接依赖库
-target_link_libraries(storage_factory_example
-    storage
-    common
-    nlohmann_json::nlohmann_json
-    ${REDIS_LIBRARIES}
-    ${MYSQL_LIBRARIES}
-)
+target_include_directories(storage_factory_example PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(storage_factory_example storage common pthread ${REDIS_LIBRARIES} ${MYSQL_LIBRARIES} uuid nlohmann_json::nlohmann_json)
+set_target_properties(storage_factory_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # 日志分析器示例
 add_executable(analyzer_example
@@ -121,35 +84,27 @@ target_link_libraries(analyzer_example
     pthread
 )
 
+# 设置输出目录
+set_target_properties(analyzer_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# 安装配置
+install(TARGETS analyzer_example
+    RUNTIME DESTINATION bin/examples
+)
+
 # 日志处理器示例
-add_executable(processor_example
-    processor_example.cpp
-)
+add_executable(processor_example processor_example.cpp)
+target_link_libraries(processor_example processor storage analyzer common network pthread muduo_net muduo_base)
+set_target_properties(processor_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
-# 设置编译选项
-target_compile_options(processor_example PRIVATE -Wall -Wextra)
-
-# 添加包含目录
-target_include_directories(processor_example PRIVATE
-    ${CMAKE_SOURCE_DIR}
-)
-
-# 链接依赖库
-target_link_libraries(processor_example
-    processor
-    analyzer
-    storage
-    network
-    common
-    nlohmann_json::nlohmann_json
-    ${ZLIB_LIBRARIES}
-    ${UUID_LIBRARY}
-    pthread
+# 安装配置
+install(TARGETS processor_example
+    RUNTIME DESTINATION bin/examples
 )
 
 # 告警管理器示例
 add_executable(alert_example
-    alert_example.cpp
+    legacy/alert_example.cpp
 )
 
 # 设置编译选项
@@ -206,48 +161,61 @@ target_link_libraries(complete_system_example
     pthread
 )
 
-# TCP服务器测试
-add_executable(test_tcp_server
-    test_tcp_server.cpp
+# 网络服务器示例
+add_executable(network_server_example
+    network_server_example.cpp
 )
 
 # 设置编译选项
-target_compile_options(test_tcp_server PRIVATE -Wall -Wextra)
+target_compile_options(network_server_example PRIVATE -Wall -Wextra)
 
 # 添加包含目录
-target_include_directories(test_tcp_server PRIVATE
+target_include_directories(network_server_example PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 
 # 链接依赖库
-target_link_libraries(test_tcp_server
+target_link_libraries(network_server_example
     network
     common
-    muduo_net
-    muduo_base
     pthread
 )
 
-# TCP客户端测试
-add_executable(test_tcp_client
-    test_tcp_client.cpp
+# 网络客户端示例
+add_executable(network_client_example
+    network_client_example.cpp
 )
 
 # 设置编译选项
-target_compile_options(test_tcp_client PRIVATE -Wall -Wextra)
+target_compile_options(network_client_example PRIVATE -Wall -Wextra)
 
 # 添加包含目录
-target_include_directories(test_tcp_client PRIVATE
+target_include_directories(network_client_example PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 
 # 链接依赖库
-target_link_libraries(test_tcp_client
+target_link_libraries(network_client_example
     network
     common
-    muduo_net
-    muduo_base
     pthread
 )
 
-# 如果有其他示例，可以在这里添加 
+# Redis存储示例
+add_executable(redis_storage_example redis_storage_example.cpp)
+target_compile_options(redis_storage_example PRIVATE -Wall -Wextra)
+target_include_directories(redis_storage_example PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(redis_storage_example storage common pthread ${REDIS_LIBRARIES})
+set_target_properties(redis_storage_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# MySQL存储示例
+add_executable(mysql_storage_example mysql_storage_example.cpp)
+target_compile_options(mysql_storage_example PRIVATE -Wall -Wextra)
+target_include_directories(mysql_storage_example PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(mysql_storage_example storage common pthread ${MYSQL_LIBRARIES} uuid)
+set_target_properties(mysql_storage_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# 安装所有存储相关示例
+install(TARGETS redis_storage_example mysql_storage_example storage_factory_example
+    RUNTIME DESTINATION bin/examples
+) 

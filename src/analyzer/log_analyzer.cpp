@@ -4,6 +4,7 @@
 #include <sstream>
 #include <regex>
 #include <algorithm>
+#include <chrono>
 
 namespace xumj {
 namespace analyzer {
@@ -14,18 +15,34 @@ RegexAnalysisRule::RegexAnalysisRule(const std::string& name,
                                   const std::string& pattern,
                                   const std::vector<std::string>& fieldNames)
     : name_(name), pattern_(pattern), fieldNames_(fieldNames) {
+    // 预编译正则表达式
+    try {
+        regexPattern_ = std::make_unique<std::regex>(pattern_);
+    } catch (const std::regex_error& e) {
+        std::cerr << "正则表达式编译错误: " << e.what() << std::endl;
+    }
+}
+
+std::string RegexAnalysisRule::GetName() const {
+    return name_;
 }
 
 std::unordered_map<std::string, std::string> RegexAnalysisRule::Analyze(const LogRecord& record) const {
     std::unordered_map<std::string, std::string> results;
     
+    if (!config_.enabled) {
+        results["enabled"] = "false";
+        return results;
+    }
+    
     try {
-        // 创建正则表达式对象
-        std::regex regexPattern(pattern_);
+        if (!regexPattern_) {
+            throw std::runtime_error("正则表达式未编译");
+        }
         
         // 匹配日志消息
         std::smatch matches;
-        if (std::regex_search(record.message, matches, regexPattern)) {
+        if (std::regex_search(record.message, matches, *regexPattern_)) {
             // 提取匹配组并映射到字段名
             for (size_t i = 1; i < matches.size() && i - 1 < fieldNames_.size(); ++i) {
                 if (matches[i].matched) {
@@ -33,11 +50,10 @@ std::unordered_map<std::string, std::string> RegexAnalysisRule::Analyze(const Lo
                 }
             }
             
-            // 添加匹配结果标志
             results["matched"] = "true";
             results["rule"] = name_;
+            results["group"] = config_.group;
             
-            // 添加has_error字段，如果模式包含error/exception/failed相关词汇，则设为true
             if (pattern_.find("error") != std::string::npos || 
                 pattern_.find("exception") != std::string::npos || 
                 pattern_.find("failed") != std::string::npos) {
@@ -45,22 +61,33 @@ std::unordered_map<std::string, std::string> RegexAnalysisRule::Analyze(const Lo
             }
         } else {
             results["matched"] = "false";
-            
-            // 添加has_error字段，设为false
-            if (fieldNames_.size() > 0 && fieldNames_[0] == "has_error") {
-                results["has_error"] = "false";
-            }
+            results["group"] = config_.group;
         }
-    } catch (const std::regex_error& e) {
-        // 处理正则表达式错误
-        results["error"] = "正则表达式错误: " + std::string(e.what());
+    } catch (const std::exception& e) {
+        results["error"] = "分析错误: " + std::string(e.what());
     }
     
     return results;
 }
 
-std::string RegexAnalysisRule::GetName() const {
-    return name_;
+const RuleConfig& RegexAnalysisRule::GetConfig() const {
+    return config_;
+}
+
+void RegexAnalysisRule::SetConfig(const RuleConfig& config) {
+    config_ = config;
+}
+
+void RegexAnalysisRule::Enable() {
+    config_.enabled = true;
+}
+
+void RegexAnalysisRule::Disable() {
+    config_.enabled = false;
+}
+
+bool RegexAnalysisRule::IsEnabled() const {
+    return config_.enabled;
 }
 
 // KeywordAnalysisRule实现
@@ -71,59 +98,85 @@ KeywordAnalysisRule::KeywordAnalysisRule(const std::string& name,
     : name_(name), keywords_(keywords), scoring_(scoring) {
 }
 
+std::string KeywordAnalysisRule::GetName() const {
+    return name_;
+}
+
 std::unordered_map<std::string, std::string> KeywordAnalysisRule::Analyze(const LogRecord& record) const {
     std::unordered_map<std::string, std::string> results;
     
-    // 将日志消息转为小写以进行不区分大小写的匹配
-    std::string lowerMessage = record.message;
-    std::transform(lowerMessage.begin(), lowerMessage.end(), lowerMessage.begin(),
-                  [](unsigned char c) { return std::tolower(c); });
-    
-    // 匹配关键字
-    int matchCount = 0;
-    std::vector<std::string> matchedKeywords;
-    
-    for (const auto& keyword : keywords_) {
-        // 关键字转小写
-        std::string lowerKeyword = keyword;
-        std::transform(lowerKeyword.begin(), lowerKeyword.end(), lowerKeyword.begin(),
-                      [](unsigned char c) { return std::tolower(c); });
-        
-        // 查找关键字
-        if (lowerMessage.find(lowerKeyword) != std::string::npos) {
-            matchCount++;
-            matchedKeywords.push_back(keyword);
-        }
+    if (!config_.enabled) {
+        results["enabled"] = "false";
+        return results;
     }
     
-    // 生成结果
-    if (matchCount > 0) {
-        results["matched"] = "true";
-        results["rule"] = name_;
-        results["match_count"] = std::to_string(matchCount);
+    try {
+        // 将日志消息转为小写以进行不区分大小写的匹配
+        std::string lowerMessage = record.message;
+        std::transform(lowerMessage.begin(), lowerMessage.end(), lowerMessage.begin(),
+                      [](unsigned char c) { return std::tolower(c); });
         
-        // 如果进行打分，计算匹配度得分(0-100)
-        if (scoring_ && !keywords_.empty()) {
-            int score = (matchCount * 100) / static_cast<int>(keywords_.size());
-            results["score"] = std::to_string(score);
+        // 匹配关键字
+        int matchCount = 0;
+        std::vector<std::string> matchedKeywords;
+        
+        for (const auto& keyword : keywords_) {
+            std::string lowerKeyword = keyword;
+            std::transform(lowerKeyword.begin(), lowerKeyword.end(), lowerKeyword.begin(),
+                          [](unsigned char c) { return std::tolower(c); });
+            
+            if (lowerMessage.find(lowerKeyword) != std::string::npos) {
+                matchCount++;
+                matchedKeywords.push_back(keyword);
+            }
         }
         
-        // 存储匹配的关键字列表
-        std::stringstream ss;
-        for (size_t i = 0; i < matchedKeywords.size(); ++i) {
-            if (i > 0) ss << ", ";
-            ss << matchedKeywords[i];
+        if (matchCount > 0) {
+            results["matched"] = "true";
+            results["rule"] = name_;
+            results["group"] = config_.group;
+            results["match_count"] = std::to_string(matchCount);
+            
+            if (scoring_ && !keywords_.empty()) {
+                int score = (matchCount * 100) / static_cast<int>(keywords_.size());
+                results["score"] = std::to_string(score);
+            }
+            
+            std::stringstream ss;
+            for (size_t i = 0; i < matchedKeywords.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << matchedKeywords[i];
+            }
+            results["matched_keywords"] = ss.str();
+        } else {
+            results["matched"] = "false";
+            results["group"] = config_.group;
         }
-        results["matched_keywords"] = ss.str();
-    } else {
-        results["matched"] = "false";
+    } catch (const std::exception& e) {
+        results["error"] = "分析错误: " + std::string(e.what());
     }
     
     return results;
 }
 
-std::string KeywordAnalysisRule::GetName() const {
-    return name_;
+const RuleConfig& KeywordAnalysisRule::GetConfig() const {
+    return config_;
+}
+
+void KeywordAnalysisRule::SetConfig(const RuleConfig& config) {
+    config_ = config;
+}
+
+void KeywordAnalysisRule::Enable() {
+    config_.enabled = true;
+}
+
+void KeywordAnalysisRule::Disable() {
+    config_.enabled = false;
+}
+
+bool KeywordAnalysisRule::IsEnabled() const {
+    return config_.enabled;
 }
 
 // LogAnalyzer实现
@@ -180,7 +233,29 @@ bool LogAnalyzer::Initialize(const AnalyzerConfig& config) {
 void LogAnalyzer::AddRule(std::shared_ptr<AnalysisRule> rule) {
     if (rule) {
         std::lock_guard<std::mutex> lock(rulesMutex_);
-        rules_.push_back(std::move(rule));
+        rules_.push_back(rule);
+        
+        // 添加到规则组
+        const auto& group = rule->GetConfig().group;
+        ruleGroups_[group].push_back(rule);
+        
+        // 按优先级排序
+        SortRulesByPriority();
+    }
+}
+
+void LogAnalyzer::SortRulesByPriority() {
+    std::sort(rules_.begin(), rules_.end(),
+              [](const auto& a, const auto& b) {
+                  return a->GetConfig().priority > b->GetConfig().priority;
+              });
+              
+    // 对每个规则组内的规则也进行排序
+    for (auto& [group, rules] : ruleGroups_) {
+        std::sort(rules.begin(), rules.end(),
+                 [](const auto& a, const auto& b) {
+                     return a->GetConfig().priority > b->GetConfig().priority;
+                 });
     }
 }
 
@@ -305,55 +380,127 @@ void LogAnalyzer::AnalyzeThreadFunc() {
 }
 
 void LogAnalyzer::ProcessRecord(const LogRecord& record) {
-    std::vector<std::shared_ptr<AnalysisRule>> currentRules;
+    auto startTime = std::chrono::steady_clock::now();
+    bool hasError = false;
     
-    // 获取当前规则集合（避免长时间持有锁）
-    {
-        std::lock_guard<std::mutex> lock(rulesMutex_);
-        currentRules = rules_;
-    }
-    
-    // 应用所有规则
-    std::unordered_map<std::string, std::string> combinedResults;
-    
-    for (const auto& rule : currentRules) {
-        // 应用规则
-        auto results = rule->Analyze(record);
+    try {
+        std::vector<std::shared_ptr<AnalysisRule>> rules;
+        {
+            std::lock_guard<std::mutex> lock(rulesMutex_);
+            rules = rules_;  // 复制规则列表以避免处理过程中规则被修改
+        }
         
-        // 如果有匹配结果，合并到总结果中
-        if (results["matched"] == "true") {
-            for (const auto& [key, value] : results) {
-                // 规则名作为前缀避免冲突
-                std::string prefixedKey = rule->GetName() + "." + key;
-                combinedResults[prefixedKey] = value;
+        for (const auto& rule : rules) {
+            if (!rule->IsEnabled()) {
+                continue;
+            }
+            
+            auto ruleStartTime = std::chrono::steady_clock::now();
+            auto results = rule->Analyze(record);
+            auto ruleEndTime = std::chrono::steady_clock::now();
+            
+            // 更新性能指标
+            if (config_.enableMetrics) {
+                auto processTime = std::chrono::duration_cast<std::chrono::microseconds>(
+                    ruleEndTime - ruleStartTime);
+                UpdateMetrics(rule->GetName(), processTime, results.count("error") > 0);
+            }
+            
+            // 存储结果
+            if (config_.storeResults) {
+                if (redisStorage_) {
+                    StoreResultToRedis(record.id, results);
+                }
+                if (mysqlStorage_) {
+                    StoreResultToMySQL(record.id, results);
+                }
+            }
+            
+            // 调用回调函数
+            {
+                std::lock_guard<std::mutex> lock(callbackMutex_);
+                if (analysisCallback_) {
+                    analysisCallback_(record.id, results);
+                }
+            }
+            
+            if (results.count("error") > 0) {
+                hasError = true;
             }
         }
+    } catch (const std::exception& e) {
+        hasError = true;
+        std::cerr << "处理记录时发生错误: " << e.what() << std::endl;
     }
     
-    // 添加基本信息到结果中
-    combinedResults["record.id"] = record.id;
-    combinedResults["record.timestamp"] = record.timestamp;
-    combinedResults["record.level"] = record.level;
-    combinedResults["record.source"] = record.source;
-    
-    // 存储分析结果
-    if (config_.storeResults) {
-        // 存储到Redis
-        if (redisStorage_) {
-            StoreResultToRedis(record.id, combinedResults);
-        }
+    // 更新总处理时间
+    if (config_.enableMetrics) {
+        auto endTime = std::chrono::steady_clock::now();
+        auto totalTime = std::chrono::duration_cast<std::chrono::microseconds>(
+            endTime - startTime);
+        metrics_.totalProcessTime += totalTime.count();
         
-        // 存储到MySQL
-        if (mysqlStorage_) {
-            StoreResultToMySQL(record.id, combinedResults);
+        if (hasError) {
+            metrics_.errorRecords++;
         }
     }
-    
-    // 调用回调函数
-    {
-        std::lock_guard<std::mutex> lock(callbackMutex_);
-        if (analysisCallback_) {
-            analysisCallback_(record.id, combinedResults);
+}
+
+void LogAnalyzer::UpdateMetrics(const std::string& ruleName,
+                              const std::chrono::microseconds& processTime,
+                              bool hasError) {
+    auto& ruleMetrics = metrics_.GetRuleMetrics(ruleName);
+    ruleMetrics.processTime += processTime.count();
+    ruleMetrics.matchCount++;
+    if (hasError) {
+        ruleMetrics.errorCount++;
+    }
+    ruleMetrics.lastMatchTime = std::chrono::steady_clock::now();
+}
+
+const AnalyzerMetrics& LogAnalyzer::GetMetrics() const {
+    return metrics_;
+}
+
+void LogAnalyzer::ResetMetrics() {
+    metrics_.Reset();
+}
+
+std::vector<std::string> LogAnalyzer::GetRuleGroups() const {
+    std::vector<std::string> groups;
+    std::lock_guard<std::mutex> lock(rulesMutex_);
+    for (const auto& [group, _] : ruleGroups_) {
+        groups.push_back(group);
+    }
+    return groups;
+}
+
+std::vector<std::shared_ptr<AnalysisRule>> LogAnalyzer::GetRulesByGroup(
+    const std::string& group) const {
+    std::lock_guard<std::mutex> lock(rulesMutex_);
+    auto it = ruleGroups_.find(group);
+    if (it != ruleGroups_.end()) {
+        return it->second;
+    }
+    return {};
+}
+
+void LogAnalyzer::EnableGroup(const std::string& group) {
+    std::lock_guard<std::mutex> lock(rulesMutex_);
+    auto it = ruleGroups_.find(group);
+    if (it != ruleGroups_.end()) {
+        for (auto& rule : it->second) {
+            rule->Enable();
+        }
+    }
+}
+
+void LogAnalyzer::DisableGroup(const std::string& group) {
+    std::lock_guard<std::mutex> lock(rulesMutex_);
+    auto it = ruleGroups_.find(group);
+    if (it != ruleGroups_.end()) {
+        for (auto& rule : it->second) {
+            rule->Disable();
         }
     }
 }

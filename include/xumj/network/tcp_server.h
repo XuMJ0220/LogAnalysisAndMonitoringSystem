@@ -2,187 +2,195 @@
 #define XUMJ_NETWORK_TCP_SERVER_H
 
 #include <string>
-#include <memory>
-#include <functional>
 #include <map>
-#include <vector>
+#include <functional>
+#include <memory>
+#include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 #include <muduo/net/TcpServer.h>
 #include <muduo/net/EventLoop.h>
-#include <muduo/net/InetAddress.h>
+#include <muduo/net/TcpConnection.h>
 #include <muduo/base/Timestamp.h>
 
 namespace xumj {
 namespace network {
 
-/**
- * @class TcpServer
- * @brief 高性能TCP服务器，基于muduo网络库实现
- * 
- * 此类封装了muduo的TcpServer，提供了更简洁的接口和额外的功能，
- * 如自动负载均衡、连接统计和流量控制等。主要用于接收来自日志收集
- * 客户端的连接和数据。
+/*
+ * @brief TCP服务器类，包装了muduo的TcpServer
  */
 class TcpServer {
 public:
-    /**
-     * @brief 消息回调函数类型
-     * @param connectionId 连接ID
-     * @param message 接收到的消息内容
-     * @param timestamp 接收时间戳
-     */
-    using MessageCallback = std::function<void(uint64_t connectionId, 
-                                             const std::string& message,
-                                             muduo::Timestamp timestamp)>;
+    // 回调函数类型
+    using MessageCallback = std::function<void(uint64_t, const std::string&, muduo::Timestamp)>;
+    using ConnectionCallback = std::function<void(uint64_t, const std::string&, bool)>;
     
-    /**
-     * @brief 连接回调函数类型
-     * @param connectionId 连接ID
-     * @param clientAddr 客户端地址
-     * @param isConnected 是连接建立还是断开
-     */
-    using ConnectionCallback = std::function<void(uint64_t connectionId, 
-                                                const std::string& clientAddr,
-                                                bool isConnected)>;
-    
-    /**
+    /*
      * @brief 构造函数
-     * @param serverName 服务器名称，用于日志标识
+     * @param serverName 服务器名称
      * @param listenAddr 监听地址
      * @param port 监听端口
-     * @param numThreads 网络IO线程数，默认为CPU核心数
+     * @param numThreads 工作线程数，0表示使用系统默认值
      */
     TcpServer(const std::string& serverName,
               const std::string& listenAddr,
               uint16_t port,
               size_t numThreads = 0);
     
-    /**
+    /*
      * @brief 析构函数
      */
     ~TcpServer();
     
-    /**
+    /*
      * @brief 启动服务器
      */
     void Start();
-    
-    /**
+
+    /*
      * @brief 停止服务器
      */
     void Stop();
     
-    /**
-     * @brief 设置消息回调
-     * @param callback 消息回调函数
-     */
-    void SetMessageCallback(const MessageCallback& callback);
-    
-    /**
-     * @brief 设置连接回调
-     * @param callback 连接回调函数
-     */
-    void SetConnectionCallback(const ConnectionCallback& callback);
-    
-    /**
-     * @brief 向指定连接发送数据
+    /*
+     * @brief 发送消息给指定的连接
      * @param connectionId 连接ID
-     * @param message 要发送的消息
-     * @return 是否成功发送
+     * @param message 消息内容
+     * @return 成功返回true，失败返回false
      */
     bool Send(uint64_t connectionId, const std::string& message);
     
-    /**
-     * @brief 向所有连接广播数据
-     * @param message 要发送的消息
-     * @return 成功发送的连接数量
+    /*
+     * @brief 广播消息给所有连接
+     * @param message 消息内容
+     * @return 成功发送的连接数
      */
     size_t Broadcast(const std::string& message);
     
-    /**
+    /*
      * @brief 关闭指定连接
      * @param connectionId 连接ID
-     * @return 是否成功关闭
+     * @return 成功返回true，失败返回false
      */
     bool CloseConnection(uint64_t connectionId);
     
-    /**
-     * @brief 获取当前活跃连接数
-     * @return 活跃连接数
+    /*
+     * @brief 获取当前连接数
+     * @return 连接数
      */
     size_t GetConnectionCount() const;
     
-    /**
-     * @brief 获取服务器是否正在运行
-     * @return 是否正在运行
-     */
-    bool IsRunning() const;
-    
-    /**
-     * @brief 获取服务器名称
-     * @return 服务器名称
-     */
-    const std::string& GetServerName() const;
-    
-    /**
-     * @brief 获取服务器监听地址
-     * @return 监听地址
-     */
-    const std::string& GetListenAddr() const;
-    
-    /**
-     * @brief 获取服务器监听端口
-     * @return 监听端口
-     */
-    uint16_t GetPort() const;
-    
-    /**
-     * @brief 获取连接指针
+    /*
+     * @brief 获取指定ID的连接
      * @param id 连接ID
-     * @return 连接指针
+     * @return 连接指针，如果不存在则返回nullptr
      */
     muduo::net::TcpConnectionPtr GetConnection(uint64_t id);
     
+    /*
+     * @brief 设置消息回调函数
+     * @param callback 回调函数
+     */
+    void SetMessageCallback(const MessageCallback& callback) {
+        messageCallback_ = callback;
+    }
+    
+    /*
+     * @brief 设置连接回调函数
+     * @param callback 回调函数
+     */
+    void SetConnectionCallback(const ConnectionCallback& callback) {
+        connectionCallback_ = callback;
+    }
+    
+    /*
+     * @brief 获取服务器名称
+     * @return 服务器名称
+     */
+    const std::string& GetServerName() const {
+        return serverName_;
+    }
+    
+    /*
+     * @brief 获取监听地址
+     * @return 监听地址
+     */
+    const std::string& GetListenAddr() const {
+        return listenAddr_;
+    }
+    
+    /*
+     * @brief 获取监听端口
+     * @return 监听端口
+     */
+    uint16_t GetPort() const {
+        return port_;
+    }
+    
+    /*
+     * @brief 获取线程数
+     * @return 线程数
+     */
+    size_t GetNumThreads() const {
+        return numThreads_;
+    }
+    
+    /*
+     * @brief 获取服务器运行状态
+     * @return 运行状态
+     */
+    bool IsRunning() const {
+        bool running = false;
+        {
+            std::lock_guard<std::mutex> lock(shutdownMutex_);
+            running = running_;
+        }
+        return running;
+    }
+    
 private:
-    // muduo事件循环
-    std::unique_ptr<muduo::net::EventLoop> loop_;
+    std::string serverName_;         // 服务器名称
+    std::string listenAddr_;         // 监听地址
+    uint16_t port_;                  // 监听端口
+    size_t numThreads_;              // 工作线程数
     
-    // muduo TCP服务器
-    std::unique_ptr<muduo::net::TcpServer> server_;
+    bool running_;                   // 服务器运行状态（需要与互斥锁一起使用）
+    std::atomic<uint64_t> nextConnectionId_; // 下一个连接ID
     
-    // 服务器配置信息
-    std::string serverName_;
-    std::string listenAddr_;
-    uint16_t port_;
-    size_t numThreads_;
-    bool running_;
+    // 互斥锁和条件变量，用于安全停止线程
+    mutable std::mutex shutdownMutex_;
+    std::condition_variable shutdownCv_;
     
-    // 用户回调函数
-    MessageCallback messageCallback_;
-    ConnectionCallback connectionCallback_;
-    
+    // Muduo相关 - 使用指针而非智能指针，因为它们的生命周期由事件循环线程管理
+    muduo::net::EventLoop* loop_;          // 事件循环指针
+    muduo::net::TcpServer* server_;        // TCP服务器指针
+    std::unique_ptr<std::thread> loopThread_; // 事件循环线程
+
     // 连接管理
-    using TcpConnectionPtr = std::shared_ptr<muduo::net::TcpConnection>;
-    std::map<uint64_t, TcpConnectionPtr> connections_;
-    mutable std::mutex connectionsMutex_;
-    uint64_t nextConnectionId_;
+    mutable std::mutex connectionsMutex_;    // 连接映射表的互斥锁
+    std::map<uint64_t, muduo::net::TcpConnectionPtr> connections_; // 连接ID到连接对象的映射
+    
+    // 回调函数
+    ConnectionCallback connectionCallback_; // 连接回调
+    MessageCallback messageCallback_;      // 消息回调
     
     // muduo回调处理
-    void HandleConnection(const TcpConnectionPtr& conn, bool connected);
-    void HandleMessage(const TcpConnectionPtr& conn, 
-                      muduo::net::Buffer* buffer,
-                      muduo::Timestamp timestamp);
+    void HandleConnection(const muduo::net::TcpConnectionPtr& conn, bool connected);
+    void HandleMessage(const muduo::net::TcpConnectionPtr& conn, 
+                       muduo::net::Buffer* buffer,
+                       muduo::Timestamp timestamp);
     
-    // 生成新的连接ID
-    uint64_t GenerateConnectionId();
-    
-    // 连接ID与连接对象的映射管理
-    void RegisterConnection(uint64_t id, const TcpConnectionPtr& conn);
+    // 连接管理
+    uint64_t GenerateConnectionId() {
+        return nextConnectionId_++;
+    }
+    void RegisterConnection(uint64_t id, const muduo::net::TcpConnectionPtr& conn);
     void UnregisterConnection(uint64_t id);
 };
 
 } // namespace network
-} // namespace xumj
+} // namespace xumj 
 
-#endif // XUMJ_NETWORK_TCP_SERVER_H 
+#endif // XUMJ_NETWORK_TCP_SERVER_H

@@ -24,13 +24,21 @@ std::string GenerateUUID() {
 
 MySQLConnection::MySQLConnection(const MySQLConfig& config)
     : mysql_(nullptr), config_(config) {
+    // 打印连接参数（调试用）
+    std::cout << "MySQL连接参数:" << std::endl
+              << "  host: " << config.host << std::endl
+              << "  port: " << config.port << std::endl
+              << "  username: " << config.username << std::endl
+              << "  password: " << (config.password.empty() ? "空" : "已设置") << std::endl
+              << "  database: " << config.database << std::endl;
+    
     // 初始化MySQL库
     mysql_ = mysql_init(nullptr);
     if (mysql_ == nullptr) {
         throw MySQLStorageException("无法初始化MySQL连接: 内存不足");
     }
     
-    // 设置连接超时
+    // 设置连接超时,如果超时了，则自动终端并返回错误,而不是无限期地等待
     unsigned int timeout = config.timeout;
     mysql_options(mysql_, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
     
@@ -397,10 +405,11 @@ bool MySQLStorage::SaveLogEntry(const LogEntry& entry) {
                 // 尝试将时间戳转换为标准格式
                 try {
                     std::time_t timestamp = std::stoul(safeTimestamp);
-                    std::tm* timeinfo = std::localtime(&timestamp);
-                    char buffer[80];
-                    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
-                    safeTimestamp = buffer;
+                    std::tm now_tm = *std::localtime(&timestamp);
+
+                    std::stringstream ss;
+                    ss<<std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+                    safeTimestamp = ss.str();
                 } catch (...) {
                     // 转换失败，使用当前时间
                     auto now = std::chrono::system_clock::now();
@@ -724,10 +733,10 @@ std::vector<MySQLStorage::LogEntry> MySQLStorage::SearchLogEntriesByKeyword(
     auto conn = pool_->GetConnection();
     
     try {
-        // 构建全文搜索查询
+        // 构建搜索查询 - 使用LIKE代替MATCH AGAINST进行简单搜索
         std::stringstream sql;
-        sql << "SELECT * FROM log_entries WHERE MATCH(message) AGAINST ('"
-            << conn->EscapeString(keyword) << "' IN BOOLEAN MODE)";
+        sql << "SELECT * FROM log_entries WHERE message LIKE '%"
+            << conn->EscapeString(keyword) << "%'";
         
         // 添加ORDER BY子句
         sql << " ORDER BY timestamp DESC";
@@ -751,10 +760,10 @@ std::vector<MySQLStorage::LogEntry> MySQLStorage::SearchLogEntriesByKeyword(
         
         return entries;
     } catch (const MySQLStorageException& e) {
-        std::cerr << "全文搜索日志条目失败: " << e.what() << std::endl;
+        std::cerr << "搜索日志条目失败: " << e.what() << std::endl;
         return {};
     }
-}
+} 
 
 int MySQLStorage::GetLogEntryCount() {
     auto conn = pool_->GetConnection();
@@ -837,14 +846,15 @@ std::string MySQLStorage::BuildWhereClause(const std::unordered_map<std::string,
     for (const auto& condition : conditions) {
         std::string field = condition.first;
         std::string value = condition.second;
-        
+         // 特殊处理时间范围查询
         if (field == "timestamp_range") {
-            // 处理时间范围条件
+            // 格式: "开始时间 TO 结束时间"
             size_t pos = value.find(" TO ");
             if (pos != std::string::npos) {
                 std::string start_time = value.substr(0, pos);
                 std::string end_time = value.substr(pos + 4);
                 
+                // 构建时间范围条件
                 clauses.push_back("timestamp >= '" + conn->EscapeString(start_time) + "' AND timestamp <= '" + conn->EscapeString(end_time) + "'");
             }
         } else if (field == "timestamp_min") {

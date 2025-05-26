@@ -10,7 +10,9 @@ namespace storage {
 
 RedisConnection::RedisConnection(const RedisConfig& config)
     : context_(nullptr), config_(config) {
-    // 连接Redis服务器
+        
+    // 连接到Redis服务器，使用指定的主机名、端口和超时设置
+    // 若连接成功，返回一个有效的Redis上下文对象；若失败，返回包含错误信息的上下文
     struct timeval timeout = {
         config.timeout / 1000,       // 秒
         (config.timeout % 1000) * 1000 // 微秒
@@ -280,7 +282,7 @@ std::shared_ptr<RedisConnection> RedisConnectionPool::CreateConnection() {
 // ---------- RedisStorage 实现 ----------
 
 RedisStorage::RedisStorage(const RedisConfig& config)
-    : pool_(std::make_unique<RedisConnectionPool>(config)) {
+    : pool_(std::make_unique<RedisConnectionPool>(config)), transactionConn_(nullptr) {
 }
 
 RedisStorage::~RedisStorage() {
@@ -288,17 +290,25 @@ RedisStorage::~RedisStorage() {
 }
 
 std::string RedisStorage::ExecuteCommand(std::function<redisReply*(RedisConnection*)> command) {
-    auto conn = pool_->GetConnection();
+    // 如果在事务中，使用事务连接
     redisReply* reply = nullptr;
+    std::shared_ptr<RedisConnection> conn;
     
     try {
-        reply = command(conn.get());
+        if (transactionConn_) {
+            // 使用事务连接
+            reply = command(transactionConn_.get());
+        } else {
+            // 使用连接池中的连接
+            conn = pool_->GetConnection();
+            reply = command(conn.get());
+        }
         
         std::string result;
         
         switch (reply->type) {
             case REDIS_REPLY_STRING:
-                result = reply->str;
+                result = reply->str ? reply->str : "";
                 break;
             case REDIS_REPLY_INTEGER:
                 result = std::to_string(reply->integer);
@@ -307,20 +317,29 @@ std::string RedisStorage::ExecuteCommand(std::function<redisReply*(RedisConnecti
                 result = "";
                 break;
             case REDIS_REPLY_STATUS:
-                result = reply->str;
+                result = reply->str ? reply->str : "";
                 break;
             case REDIS_REPLY_ERROR:
-                throw RedisStorageException(std::string("Redis错误: ") + reply->str);
+                throw RedisStorageException(std::string("Redis错误: ") + (reply->str ? reply->str : "未知错误"));
             case REDIS_REPLY_ARRAY: {
                 std::stringstream ss;
                 for (size_t i = 0; i < reply->elements; ++i) {
                     redisReply* element = reply->element[i];
                     if (element->type == REDIS_REPLY_STRING) {
                         if (i > 0) ss << "\n";
-                        ss << element->str;
+                        ss << (element->str ? element->str : "");
                     } else if (element->type == REDIS_REPLY_INTEGER) {
                         if (i > 0) ss << "\n";
                         ss << element->integer;
+                    } else if (element->type == REDIS_REPLY_NIL) {
+                        if (i > 0) ss << "\n";
+                        ss << "";
+                    } else if (element->type == REDIS_REPLY_STATUS) {
+                        if (i > 0) ss << "\n";
+                        ss << (element->str ? element->str : "");
+                    } else {
+                        if (i > 0) ss << "\n";
+                        ss << "";
                     }
                 }
                 result = ss.str();
@@ -336,7 +355,12 @@ std::string RedisStorage::ExecuteCommand(std::function<redisReply*(RedisConnecti
         if (reply != nullptr) {
             freeReplyObject(reply);
         }
-        throw;
+        // 重新抛出异常，但确保它是RedisStorageException
+        if (dynamic_cast<const RedisStorageException*>(&e) != nullptr) {
+            throw; // 如果已经是RedisStorageException，直接重新抛出
+        } else {
+            throw RedisStorageException(std::string("Redis操作失败: ") + e.what());
+        }
     }
 }
 
@@ -352,6 +376,10 @@ bool RedisStorage::Set(const std::string& key, const std::string& value, int exp
     };
     
     std::string result = ExecuteCommand(command);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return true; // 事务模式下假定成功
+    }
     return result == "OK";
 }
 
@@ -374,6 +402,10 @@ bool RedisStorage::Delete(const std::string& key) {
     };
     
     std::string result = ExecuteCommand(command);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return true; // 事务模式下假定成功
+    }
     return result != "0";
 }
 
@@ -383,6 +415,10 @@ bool RedisStorage::Exists(const std::string& key) {
     };
     
     std::string result = ExecuteCommand(command);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return true; // 事务模式下假定存在
+    }
     return result != "0";
 }
 
@@ -392,6 +428,10 @@ bool RedisStorage::Expire(const std::string& key, int expireSeconds) {
     };
     
     std::string result = ExecuteCommand(command);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return true; // 事务模式下假定成功
+    }
     return result != "0";
 }
 
@@ -401,7 +441,20 @@ int RedisStorage::ListPush(const std::string& key, const std::string& value) {
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际长度
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 int RedisStorage::ListPushFront(const std::string& key, const std::string& value) {
@@ -410,7 +463,20 @@ int RedisStorage::ListPushFront(const std::string& key, const std::string& value
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际长度
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 std::string RedisStorage::ListPop(const std::string& key) {
@@ -443,7 +509,20 @@ int RedisStorage::ListLength(const std::string& key) {
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际长度
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 std::vector<std::string> RedisStorage::ListRange(const std::string& key, int start, int end) {
@@ -539,7 +618,20 @@ int RedisStorage::SetAdd(const std::string& key, const std::string& member) {
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际添加数量
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 int RedisStorage::SetRemove(const std::string& key, const std::string& member) {
@@ -548,7 +640,20 @@ int RedisStorage::SetRemove(const std::string& key, const std::string& member) {
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际删除数量
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 bool RedisStorage::SetIsMember(const std::string& key, const std::string& member) {
@@ -585,44 +690,117 @@ int RedisStorage::SetSize(const std::string& key) {
     };
     
     std::string result = ExecuteCommand(command);
-    return std::stoi(result);
+    // 在事务模式下，Redis会返回"QUEUED"
+    if (result == "QUEUED") {
+        return 0; // 事务模式下不返回实际大小
+    }
+    
+    try {
+        return std::stoi(result);
+    } catch (const std::invalid_argument& e) {
+        // 结果不是有效的数字
+        throw RedisStorageException("无法将Redis结果转换为整数: " + result);
+    } catch (const std::out_of_range& e) {
+        // 结果数值超出int范围
+        throw RedisStorageException("Redis结果数值超出范围: " + result);
+    }
 }
 
 bool RedisStorage::Multi() {
-    auto command = [&](RedisConnection* conn) -> redisReply* {
-        return conn->Execute("MULTI");
-    };
+    // 获取并保存专用连接
+    transactionConn_ = pool_->GetConnection();
+    auto reply = transactionConn_->Execute("MULTI");
     
-    std::string result = ExecuteCommand(command);
-    return result == "OK";
+    if (reply->type == REDIS_REPLY_ERROR) {
+        std::string error = "Redis错误: " + std::string(reply->str);
+        freeReplyObject(reply);
+        transactionConn_.reset();
+        throw RedisStorageException(error);
+    }
+    
+    freeReplyObject(reply);
+    return true;
 }
 
 std::vector<std::string> RedisStorage::Exec() {
-    auto command = [&](RedisConnection* conn) -> redisReply* {
-        return conn->Execute("EXEC");
-    };
-    
-    std::string result = ExecuteCommand(command);
-    std::vector<std::string> results;
-    
-    if (!result.empty()) {
-        std::stringstream ss(result);
-        std::string line;
-        while (std::getline(ss, line)) {
-            results.push_back(line);
-        }
+    if (!transactionConn_) {
+        throw RedisStorageException("没有活动的事务，请先调用Multi()");
     }
     
-    return results;
+    redisReply* reply = nullptr;
+    std::vector<std::string> results;
+    
+    try {
+        reply = transactionConn_->Execute("EXEC");
+        
+        if (reply->type == REDIS_REPLY_ARRAY) {
+            for (size_t i = 0; i < reply->elements; ++i) {
+                redisReply* element = reply->element[i];
+                
+                if (element->type == REDIS_REPLY_STRING) {
+                    results.push_back(element->str ? element->str : "");
+                } else if (element->type == REDIS_REPLY_INTEGER) {
+                    results.push_back(std::to_string(element->integer));
+                } else if (element->type == REDIS_REPLY_NIL) {
+                    results.push_back("");
+                } else if (element->type == REDIS_REPLY_STATUS) {
+                    results.push_back(element->str ? element->str : "");
+                } else if (element->type == REDIS_REPLY_ERROR) {
+                    // 处理错误响应
+                    results.push_back("ERROR: " + std::string(element->str ? element->str : "未知错误"));
+                } else {
+                    results.push_back(""); // 未知类型
+                }
+            }
+        } else if (reply->type == REDIS_REPLY_NIL) {
+            // 事务可能被废弃或之前没有调用MULTI
+            throw RedisStorageException("事务执行失败：EXEC返回空值，可能是事务被废弃或没有调用MULTI");
+        } else if (reply->type == REDIS_REPLY_ERROR) {
+            // Redis返回了错误
+            throw RedisStorageException("事务执行错误: " + std::string(reply->str ? reply->str : "未知错误"));
+        } else {
+            // 其他未预期类型
+            throw RedisStorageException("事务执行返回了未预期的结果类型");
+        }
+        
+        freeReplyObject(reply);
+        
+        // 释放事务连接
+        transactionConn_.reset();
+        
+        return results;
+    } catch (const std::exception& e) {
+        // 处理异常
+        if (reply) {
+            freeReplyObject(reply);
+        }
+        
+        // 释放事务连接
+        transactionConn_.reset();
+        
+        // 重新抛出异常，但确保它是RedisStorageException
+        if (dynamic_cast<const RedisStorageException*>(&e) != nullptr) {
+            throw;  // 如果已经是RedisStorageException，直接重新抛出
+        } else {
+            throw RedisStorageException(std::string("事务执行失败: ") + e.what());
+        }
+    }
 }
 
 bool RedisStorage::Discard() {
-    auto command = [&](RedisConnection* conn) -> redisReply* {
-        return conn->Execute("DISCARD");
-    };
+    if (!transactionConn_) {
+        throw RedisStorageException("没有活动的事务，请先调用Multi()");
+    }
     
-    std::string result = ExecuteCommand(command);
-    return result == "OK";
+    auto reply = transactionConn_->Execute("DISCARD");
+    bool success = (reply->type == REDIS_REPLY_STATUS);
+    
+    freeReplyObject(reply);
+    
+    // 释放事务连接
+    transactionConn_.reset();
+    
+    return success;
 }
 
 bool RedisStorage::Ping() {

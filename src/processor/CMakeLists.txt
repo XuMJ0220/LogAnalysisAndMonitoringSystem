@@ -1,13 +1,13 @@
 # src/processor/CMakeLists.txt
 
-# 暂时添加一个空的处理器库，后续会逐步实现
+# 添加处理器库
 add_library(processor STATIC
     log_processor.cpp
 )
 
 # 设置编译选项
 set_target_properties(processor PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20  # 升级到C++20以支持starts_with等新特性
     CXX_STANDARD_REQUIRED ON
 )
 
@@ -48,4 +48,11 @@ target_link_libraries(processor
     nlohmann_json::nlohmann_json
     ${ZLIB_LIBRARIES}
     ${UUID_LIBRARY}
+)
+
+# 安装配置
+install(TARGETS processor
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
 ) 

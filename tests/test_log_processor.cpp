@@ -44,10 +44,10 @@ TEST(LogProcessorTest_BasicFunctionality, ProcessorInitialization) {
         .WillRepeatedly(DoAll(
             // 模拟解析逻辑
             [](const LogData& data, LogRecord& record) {
-                record.id = data.id;
+            record.id = data.id;
                 record.timestamp = "2023-05-11 10:00:00";
-                record.level = "INFO";
-                record.source = data.source;
+            record.level = "INFO";
+            record.source = data.source;
                 record.message = data.message;
                 return true;
             },
@@ -74,7 +74,7 @@ TEST(LogProcessorTest_BasicFunctionality, ProcessorInitialization) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
     
     // 检查处理结果（这里只能验证日志被处理，无法验证回调）
-    EXPECT_EQ(processor.GetPendingCount(), 0);
+    EXPECT_EQ(processor.GetPendingCount(), 0UL);
     
     // 停止处理器
     processor.Stop();
@@ -126,7 +126,7 @@ TEST(LogProcessorTest_ProcessManyLogs, BatchProcessing) {
         logData.message = "Test log message " + std::to_string(i);
         dataList.push_back(logData);
     }
-    
+        
     // 提交日志数据
     for (const auto& data : dataList) {
         processor.SubmitLogData(data);
@@ -146,7 +146,7 @@ TEST(LogProcessorTest_ProcessManyLogs, BatchProcessing) {
     }
     
     // 验证所有日志都已处理
-    EXPECT_EQ(processor.GetPendingCount(), 0);
+    EXPECT_EQ(processor.GetPendingCount(), 0UL);
     
     // 停止处理器
     processor.Stop();
@@ -204,7 +204,7 @@ TEST(LogProcessorTest_ParserSelection, SelectCorrectParser) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
     
     // 验证所有日志都已处理
-    EXPECT_EQ(processor.GetPendingCount(), 0);
+    EXPECT_EQ(processor.GetPendingCount(), 0UL);
     
     // 停止处理器
     processor.Stop();
