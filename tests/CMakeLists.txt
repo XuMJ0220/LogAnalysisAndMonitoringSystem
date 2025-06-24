@@ -184,4 +184,8 @@ add_dependencies(mysql_debug_test
 
 # 添加子目录
 # add_subdirectory(integration)
-add_subdirectory(performance) 
+add_subdirectory(performance)
+
+add_executable(test_log_collector_batch_performance test_log_collector_batch_performance.cpp)
+target_link_libraries(test_log_collector_batch_performance gtest gtest_main pthread collector)
+add_test(NAME test_log_collector_batch_performance COMMAND test_log_collector_batch_performance) 

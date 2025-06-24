@@ -11,7 +11,7 @@
 namespace xumj {
 namespace common {
 
-/**
+/*
  * @class MemoryPool
  * @brief 高性能内存池，减少内存分配和回收的开销
  * 
@@ -22,50 +22,50 @@ namespace common {
  */
 class MemoryPool {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param chunkSize 每个内存块的大小（字节）
      * @param initialSize 初始预分配的内存块数量
      */
     explicit MemoryPool(size_t chunkSize, size_t initialSize = 1024);
     
-    /**
+    /*
      * @brief 析构函数，释放所有预分配的内存
      */
     ~MemoryPool();
     
-    /**
+    /*
      * @brief 分配指定大小的内存
      * @param size 需要分配的内存大小（字节）
      * @return 分配的内存指针，若分配失败则返回nullptr
      */
     void* Allocate(size_t size);
     
-    /**
+    /*
      * @brief 释放之前分配的内存
      * @param ptr 待释放的内存指针
      * @return 操作是否成功
      */
     bool Deallocate(void* ptr);
     
-    /**
+    /*
      * @brief 获取内存池中当前已分配的内存块数量
      * @return 已分配的内存块数量
      */
     size_t GetAllocatedCount() const;
     
-    /**
+    /*
      * @brief 获取内存池中当前空闲的内存块数量
      * @return 空闲的内存块数量
      */
     size_t GetFreeCount() const;
     
-    /**
+    /*
      * @brief 重置内存池，释放所有已分配的内存
      */
     void Reset();
     
-    /**
+    /*
      * @brief 自适应调整内存池大小
      * @param targetFreeCount 目标空闲内存块数量
      */
@@ -87,7 +87,7 @@ private:
     // 互斥锁，保护内存池的并发访问
     mutable std::mutex mutex_;
     
-    /**
+    /*
      * @brief 分配一组新的内存块
      * @param numChunks 要分配的内存块数量
      */
@@ -98,7 +98,7 @@ private:
     MemoryPool& operator=(const MemoryPool&) = delete;
 };
 
-/**
+/*
  * @class ObjectPool
  * @brief 基于内存池的对象池，用于高效地分配和回收特定类型的对象
  * @tparam T 对象类型
@@ -106,14 +106,14 @@ private:
 template <typename T>
 class ObjectPool {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param initialSize 初始预分配的对象数量
      */
     explicit ObjectPool(size_t initialSize = 1024)
         : memoryPool_(sizeof(T), initialSize) {}
     
-    /**
+    /*
      * @brief 创建一个新对象
      * @tparam Args 构造函数参数类型
      * @param args 传递给对象构造函数的参数
@@ -141,7 +141,7 @@ public:
         });
     }
     
-    /**
+    /*
      * @brief 获取对象池中已分配对象的数量
      * @return 已分配的对象数量
      */
@@ -149,7 +149,7 @@ public:
         return memoryPool_.GetAllocatedCount();
     }
     
-    /**
+    /*
      * @brief 获取对象池中空闲对象的数量
      * @return 空闲的对象数量
      */
@@ -157,14 +157,14 @@ public:
         return memoryPool_.GetFreeCount();
     }
     
-    /**
+    /*
      * @brief 重置对象池
      */
     void Reset() {
         memoryPool_.Reset();
     }
     
-    /**
+    /*
      * @brief 收缩对象池
      * @param targetFreeCount 目标空闲对象数量
      */

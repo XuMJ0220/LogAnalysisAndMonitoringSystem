@@ -196,8 +196,8 @@ void LogCollector::Shutdown() {
 }
 
 size_t LogCollector::GetPendingCount() const {
-    // 返回当前未处理的日志数量（近似值）
-    return logQueue_.IsEmpty() ? 0 : 1;  // 无法精确知道队列大小，但可以知道是否为空
+    // 返回当前未处理的日志数量（精确值）
+    return logQueue_.Size();
 }
 
 void LogCollector::SetSendCallback(std::function<void(size_t)> callback) {
@@ -215,9 +215,9 @@ bool LogCollector::SendLogBatch(std::vector<LogEntry>& logs) {
     try {
         size_t log_size = logs.size();
         for (auto it = logs.begin(); it != logs.end();) {
-            std::cout << "[" << TimestampToString(it->GetTimestamp()) << "] "
-                      << "[" << LogLevelToString(it->GetLevel()) << "] "
-                      << it->GetContent() << std::endl;
+            // std::cout << "[" << TimestampToString(it->GetTimestamp()) << "] "
+            //           << "[" << LogLevelToString(it->GetLevel()) << "] "
+            //           << it->GetContent() << std::endl;
             it = logs.erase(it); // 删除当前元素并更新迭代器
         }
         

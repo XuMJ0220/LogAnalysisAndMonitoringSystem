@@ -8,7 +8,7 @@
 namespace xumj {
 namespace common {
 
-/**
+/*
  * @class LockFreeQueue
  * @brief 高性能无锁队列，用于多线程间的数据交换
  * 
@@ -39,9 +39,12 @@ private:
     
     // 哑节点，用于简化实现
     Node* dummy_;
+    
+    // 队列大小计数器
+    std::atomic<size_t> size_{0};
 
 public:
-    /**
+    /*
      * @brief 构造函数，初始化队列
      */
     LockFreeQueue() {
@@ -51,9 +54,12 @@ public:
         // 初始化头尾指针指向哑节点
         head_.store(dummy_, std::memory_order_relaxed);
         tail_.store(dummy_, std::memory_order_relaxed);
+        
+        // 初始化大小为0
+        size_.store(0, std::memory_order_relaxed);
     }
     
-    /**
+    /*
      * @brief 析构函数，清理队列
      */
     ~LockFreeQueue() {
@@ -64,7 +70,7 @@ public:
         }
     }
     
-    /**
+    /*
      * @brief 向队列中添加元素（移动语义）
      * @param value 要添加的元素
      */
@@ -77,9 +83,12 @@ public:
         
         // 释放旧尾节点的下一个指针
         oldTail->next.store(newNode, std::memory_order_release);
+        
+        // 增加队列大小计数
+        size_.fetch_add(1, std::memory_order_relaxed);
     }
     
-    /**
+    /*
      * @brief 向队列中添加元素（拷贝语义）
      * @param value 要添加的元素
      */
@@ -92,9 +101,12 @@ public:
         
         // 释放旧尾节点的下一个指针
         oldTail->next.store(newNode, std::memory_order_release);
+        
+        // 增加队列大小计数
+        size_.fetch_add(1, std::memory_order_relaxed);
     }
     
-    /**
+    /*
      * @brief 从队列中弹出一个元素
      * @return 如果队列非空，返回队头元素的智能指针；否则返回空
      */
@@ -117,10 +129,13 @@ public:
         // 删除旧头节点
         delete currHead;
         
+        // 减少队列大小计数
+        size_.fetch_sub(1, std::memory_order_relaxed);
+        
         return result;
     }
     
-    /**
+    /*
      * @brief 检查队列是否为空
      * @return 如果队列为空返回true，否则返回false
      */
@@ -130,8 +145,16 @@ public:
         return nextNode == nullptr;
     }
     
+    /*
+     * @brief 获取队列当前大小
+     * @return 队列中元素的数量
+     */
+    size_t Size() const {
+        return size_.load(std::memory_order_relaxed);
+    }
+    
 private:
-    /**
+    /*
      * @brief 内部Push实现，处理尾指针的原子更新
      * @param newNode 要添加的新节点
      * @return 旧的尾节点
@@ -160,5 +183,4 @@ private:
 
 } // namespace common
 } // namespace xumj
-
 #endif // XUMJ_COMMON_LOCK_FREE_QUEUE_H 

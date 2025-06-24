@@ -14,7 +14,7 @@
 namespace xumj {
 namespace common {
 
-/**
+/*
  * @class ThreadPool
  * @brief 高性能线程池，用于并行处理任务
  *
@@ -24,18 +24,18 @@ namespace common {
  */
 class ThreadPool {
 public:
-    /**
+    /*
      * @brief 构造函数，创建并启动指定数量的工作线程
      * @param numThreads 线程池中的线程数量，默认为系统核心数
      */
     explicit ThreadPool(size_t numThreads = std::thread::hardware_concurrency());
     
-    /**
+    /*
      * @brief 析构函数，等待所有任务完成并停止所有线程
      */
     ~ThreadPool();
     
-    /**
+    /*
      * @brief 向线程池提交任务
      * @tparam F 函数类型
      * @tparam Args 函数参数类型
@@ -47,26 +47,26 @@ public:
     auto Submit(F&& f, Args&&... args) 
         -> std::future<typename std::result_of<F(Args...)>::type>;
     
-    /**
+    /*
      * @brief 获取线程池中线程的数量
      * @return 线程数量
      */
     size_t GetThreadCount() const;
     
-    /**
+    /*
      * @brief 获取当前等待执行的任务数量
      * @return 等待中的任务数量
      */
     size_t GetPendingTaskCount() const;
     
-    /**
+    /*
      * @brief 等待所有任务完成
      * @param timeout_ms 超时时间（毫秒），0表示无限等待
      * @return 是否所有任务都已完成
      */
     bool WaitForTasks(uint64_t timeout_ms = 0);
     
-    /**
+    /*
      * @brief 重置线程池，停止所有当前线程并创建新的线程
      * @param numThreads 新的线程数量
      */
@@ -148,6 +148,7 @@ auto ThreadPool::Submit(F&& f, Args&&... args)
                 tasksFinishedCondition_.notify_all();
             }
         });
+        
     }
     
     // 通知一个等待中的线程有新任务

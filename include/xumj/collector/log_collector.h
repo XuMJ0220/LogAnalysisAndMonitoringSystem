@@ -15,7 +15,7 @@
 namespace xumj {
 namespace collector {
 
-/**
+/*
  * @enum LogLevel
  * @brief 日志级别枚举，用于标识日志的重要性
  */
@@ -28,13 +28,13 @@ enum class LogLevel {
     CRITICAL    // 严重级别，致命错误
 };
 
-/**
+/*
  * @class LogEntry
  * @brief 表示一条日志记录
  */
 class LogEntry {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param content 日志内容
      * @param level 日志级别
@@ -44,7 +44,7 @@ public:
              std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::now())
         : content_(std::move(content)), level_(level), timestamp_(timestamp) {}
     
-    /**
+    /*
      * @brief 拷贝构造函数
      */
     LogEntry(const LogEntry& other)
@@ -52,7 +52,7 @@ public:
           level_(other.level_),
           timestamp_(other.timestamp_) {}
     
-    /**
+    /*
      * @brief 移动构造函数
      */
     LogEntry(LogEntry&& other) noexcept
@@ -60,7 +60,7 @@ public:
           level_(other.level_),
           timestamp_(other.timestamp_) {}
     
-    /**
+    /*
      * @brief 拷贝赋值运算符
      */
     LogEntry& operator=(const LogEntry& other) {
@@ -72,7 +72,7 @@ public:
         return *this;
     }
     
-    /**
+    /*
      * @brief 移动赋值运算符
      */
     LogEntry& operator=(LogEntry&& other) noexcept {
@@ -84,19 +84,19 @@ public:
         return *this;
     }
     
-    /**
+    /*
      * @brief 获取日志内容
      * @return 日志内容字符串
      */
     const std::string& GetContent() const { return content_; }
     
-    /**
+    /*
      * @brief 获取日志级别
      * @return 日志级别枚举值
      */
     LogLevel GetLevel() const { return level_; }
     
-    /**
+    /*
      * @brief 获取日志时间戳
      * @return 时间戳
      */
@@ -108,7 +108,7 @@ private:
     std::chrono::system_clock::time_point timestamp_; // 时间戳
 };
 
-/**
+/*
  * @class LogFilterInterface
  * @brief 日志过滤器接口，定义了过滤日志的方法
  */
@@ -116,7 +116,7 @@ class LogFilterInterface {
 public:
     virtual ~LogFilterInterface() = default;
     
-    /**
+    /*
      * @brief 判断一条日志是否应该被过滤
      * @param entry 日志条目
      * @return 如果日志应该被过滤掉返回true，否则返回false
@@ -124,13 +124,13 @@ public:
     virtual bool ShouldFilter(const LogEntry& entry) const = 0;
 };
 
-/**
+/*
  * @class LevelFilter
  * @brief 基于日志级别的过滤器
  */
 class LevelFilter : public LogFilterInterface {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param minLevel 最低接受的日志级别
      */
@@ -149,13 +149,13 @@ private:
     LogLevel minLevel_; // 最低接受的日志级别
 };
 
-/**
+/*
  * @class KeywordFilter
  * @brief 基于关键字的过滤器
  */
 class KeywordFilter : public LogFilterInterface {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param keywords 要过滤的关键字集合
      * @param filterMode 过滤模式（true为包含任意关键字则过滤，false为不包含任意关键字则过滤包含了则不过滤）
@@ -163,7 +163,7 @@ public:
     KeywordFilter(std::vector<std::string> keywords, bool filterMode = true)
         : keywords_(std::move(keywords)), filterMode_(filterMode) {}
     
-    /**
+    /*
      * @brief 判断日志是否应该被过滤
      * @param entry 日志条目
      * @return 根据过滤模式和关键字匹配情况返回结果
@@ -185,7 +185,7 @@ private:
     bool filterMode_;                   // 过滤模式
 };
 
-/**
+/*
  * @struct CollectorConfig
  * @brief 日志收集器的配置参数
  */
@@ -205,7 +205,7 @@ struct CollectorConfig {
     std::chrono::milliseconds retryInterval{5000}; // 重试间隔
 };
 
-/**
+/*
  * @class LogCollector
  * @brief 高性能日志收集器，用于采集、处理和发送日志数据
  * 
@@ -214,30 +214,30 @@ struct CollectorConfig {
  */
 class LogCollector {
 public:
-    /**
+    /*
      * @brief 默认构造函数
      */
     LogCollector();
     
-    /**
+    /*
      * @brief 带配置的构造函数
      * @param config 收集器配置
      */
     explicit LogCollector(const CollectorConfig& config);
     
-    /**
+    /*
      * @brief 析构函数
      */
     ~LogCollector();
     
-    /**
+    /*
      * @brief 初始化收集器
      * @param config 收集器配置
      * @return 初始化是否成功
      */
     bool Initialize(const CollectorConfig& config);
     
-    /**
+    /*
      * @brief 提交单条日志
      * @param logContent 日志内容
      * @param level 日志级别
