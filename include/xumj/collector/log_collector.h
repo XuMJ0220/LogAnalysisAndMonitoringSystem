@@ -245,7 +245,7 @@ public:
      */
     bool SubmitLog(const std::string& logContent, LogLevel level = LogLevel::INFO);
     
-    /**
+    /*
      * @brief 批量提交日志
      * @param logContents 日志内容集合
      * @param level 日志级别
@@ -253,40 +253,40 @@ public:
      */
     bool SubmitLogs(const std::vector<std::string>& logContents, LogLevel level = LogLevel::INFO);
     
-    /**
+    /*
      * @brief 添加日志过滤器
      * @param filter 过滤器共享指针
      */
     void AddFilter(std::shared_ptr<LogFilterInterface> filter);
     
-    /**
+    /*
      * @brief 移除所有过滤器
      */
     void ClearFilters();
     
-    /**
+    /*
      * @brief 强制刷新日志（立即发送当前缓存的所有日志）
      */
     void Flush();
     
-    /**
+    /*
      * @brief 关闭收集器
      */
     void Shutdown();
     
-    /**
+    /*
      * @brief 获取已收集但未发送的日志数量
      * @return 未发送的日志数量
      */
     size_t GetPendingCount() const;
     
-    /**
+    /*
      * @brief 设置发送回调函数
      * @param callback 当日志被成功发送时的回调函数
      */
     void SetSendCallback(std::function<void(size_t)> callback);
     
-    /**
+    /*
      * @brief 设置错误回调函数
      * @param callback 当发送失败时的回调函数
      */
@@ -304,32 +304,32 @@ private:
     std::function<void(size_t)> sendCallback_;                   // 发送成功回调
     std::function<void(const std::string&)> errorCallback_;       // 错误回调
     
-    /**
+    /*
      * @brief 发送日志批次
      * @param logs 日志条目批次
      * @return 发送是否成功
      */
     bool SendLogBatch(std::vector<LogEntry>& logs);
     
-    /**
+    /*
      * @brief 定时刷新线程函数
      */
     void FlushThreadFunc();
     
-    /**
+    /*
      * @brief 应用过滤规则
      * @param entry 日志条目
      * @return 日志是否应该被过滤
      */
     bool ShouldFilterLog(const LogEntry& entry) const;
     
-    /**
+    /*
      * @brief 处理重试逻辑
      * @param logs 日志条目批次
      */
     void HandleRetry(const std::vector<LogEntry>& logs);
     
-    /**
+    /*
      * @brief 压缩日志内容
      * @param content 原始日志内容
      * @return 压缩后的日志内容

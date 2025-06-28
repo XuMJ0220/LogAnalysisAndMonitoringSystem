@@ -19,15 +19,15 @@
 namespace xumj {
 namespace alert {
 
-/**
+/*
  * @enum AlertLevel
  * @brief 告警级别枚举
  */
 enum class AlertLevel {
-    INFO,      ///< 信息
-    WARNING,   ///< 警告
-    ERROR,     ///< 错误
-    CRITICAL   ///< 严重
+    INFO,      // 信息
+    WARNING,   // 警告
+    ERROR,     // 错误
+    CRITICAL   // 严重
 };
 
 /**
@@ -35,40 +35,40 @@ enum class AlertLevel {
  * @brief 告警状态枚举
  */
 enum class AlertStatus {
-    PENDING,   ///< 待处理
-    ACTIVE,    ///< 活跃
-    RESOLVED,  ///< 已解决
-    IGNORED    ///< 已忽略
+    PENDING,   // 待处理
+    ACTIVE,    // 活跃
+    RESOLVED,  // 已解决
+    IGNORED    // 已忽略
 };
 
-/**
+/*
  * @struct Alert
  * @brief 告警结构，包含告警信息
  */
 struct Alert {
-    std::string id;                ///< 告警ID
-    std::string name;              ///< 告警名称
-    std::string description;       ///< 告警描述
-    AlertLevel level;              ///< 告警级别
-    AlertStatus status;            ///< 告警状态
-    std::string source;            ///< 告警来源
-    std::chrono::system_clock::time_point timestamp;  ///< 触发时间
-    std::chrono::system_clock::time_point updateTime; ///< 更新时间
-    std::unordered_map<std::string, std::string> labels;    ///< 标签
-    std::unordered_map<std::string, std::string> annotations; ///< 注解
-    std::vector<std::string> relatedLogIds;  ///< 相关日志ID
-    int count{1};                  ///< 告警次数
+    std::string id;                // 告警ID
+    std::string name;              // 告警名称
+    std::string description;       // 告警描述
+    AlertLevel level;              // 告警级别
+    AlertStatus status;            // 告警状态
+    std::string source;            // 告警来源
+    std::chrono::system_clock::time_point timestamp;  // 触发时间
+    std::chrono::system_clock::time_point updateTime; // 更新时间
+    std::unordered_map<std::string, std::string> labels;    // 标签
+    std::unordered_map<std::string, std::string> annotations; // 注解
+    std::vector<std::string> relatedLogIds;  // 相关日志ID
+    int count{1};                  // 告警次数
 };
 
-/**
+/*
  * @class AlertRule
  * @brief 告警规则接口
  */
 class AlertRule {
 public:
     virtual ~AlertRule() = default;
-    
-    /**
+
+    /*
      * @brief 检查是否触发告警
      * @param record 日志记录
      * @param results 分析结果
@@ -78,7 +78,7 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const = 0;
     
-    /**
+    /*
      * @brief 生成告警
      * @param record 日志记录
      * @param results 分析结果
@@ -88,26 +88,26 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const = 0;
     
-    /**
+    /*
      * @brief 获取规则名称
      * @return 规则名称
      */
     virtual std::string GetName() const = 0;
     
-    /**
+    /*
      * @brief 获取规则描述
      * @return 规则描述
      */
     virtual std::string GetDescription() const = 0;
 };
 
-/**
+/*
  * @class ThresholdAlertRule
  * @brief 基于阈值的告警规则
  */
 class ThresholdAlertRule : public AlertRule {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param name 规则名称
      * @param description 规则描述
@@ -125,7 +125,7 @@ public:
         AlertLevel level = AlertLevel::WARNING
     );
     
-    /**
+    /*
      * @brief 检查是否触发告警
      * @param record 日志记录
      * @param results 分析结果
@@ -135,7 +135,7 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const override;
     
-    /**
+    /*
      * @brief 生成告警
      * @param record 日志记录
      * @param results 分析结果
@@ -145,13 +145,13 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const override;
     
-    /**
+    /*
      * @brief 获取规则名称
      * @return 规则名称
      */
     std::string GetName() const override;
     
-    /**
+    /*
      * @brief 获取规则描述
      * @return 规则描述
      */
@@ -166,13 +166,13 @@ private:
     AlertLevel level_;          ///< 告警级别
 };
 
-/**
+/*
  * @class KeywordAlertRule
  * @brief 基于关键字的告警规则
  */
 class KeywordAlertRule : public AlertRule {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param name 规则名称
      * @param description 规则描述
@@ -190,7 +190,7 @@ public:
         AlertLevel level = AlertLevel::WARNING
     );
     
-    /**
+    /*
      * @brief 检查是否触发告警
      * @param record 日志记录
      * @param results 分析结果
@@ -200,7 +200,7 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const override;
     
-    /**
+    /*
      * @brief 生成告警
      * @param record 日志记录
      * @param results 分析结果
@@ -210,13 +210,13 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results) const override;
     
-    /**
+    /*
      * @brief 获取规则名称
      * @return 规则名称
      */
     std::string GetName() const override;
     
-    /**
+    /*
      * @brief 获取规则描述
      * @return 规则描述
      */
@@ -231,7 +231,7 @@ private:
     AlertLevel level_;          ///< 告警级别
 };
 
-/**
+/*
  * @class NotificationChannel
  * @brief 通知渠道接口
  */
@@ -239,33 +239,33 @@ class NotificationChannel {
 public:
     virtual ~NotificationChannel() = default;
     
-    /**
+    /*
      * @brief 发送告警通知
      * @param alert 告警
      * @return 是否发送成功
      */
     virtual bool SendAlert(const Alert& alert) = 0;
     
-    /**
+    /*
      * @brief 获取渠道名称
      * @return 渠道名称
      */
     virtual std::string GetName() const = 0;
     
-    /**
+    /*
      * @brief 获取渠道类型
      * @return 渠道类型
      */
     virtual std::string GetType() const = 0;
 };
 
-/**
+/*
  * @class EmailNotificationChannel
  * @brief 邮件通知渠道
  */
 class EmailNotificationChannel : public NotificationChannel {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param name 渠道名称
      * @param smtpServer SMTP服务器
@@ -287,20 +287,20 @@ public:
         bool useTLS = true
     );
     
-    /**
+    /*
      * @brief 发送告警通知
      * @param alert 告警
      * @return 是否发送成功
      */
     bool SendAlert(const Alert& alert) override;
     
-    /**
+    /*
      * @brief 获取渠道名称
      * @return 渠道名称
      */
     std::string GetName() const override;
     
-    /**
+    /*
      * @brief 获取渠道类型
      * @return 渠道类型
      */
@@ -317,13 +317,13 @@ private:
     bool useTLS_;               ///< 是否使用TLS
 };
 
-/**
+/*
  * @class WebhookNotificationChannel
  * @brief Webhook通知渠道
  */
 class WebhookNotificationChannel : public NotificationChannel {
 public:
-    /**
+    /*
      * @brief 构造函数
      * @param name 渠道名称
      * @param url Webhook URL
@@ -337,20 +337,20 @@ public:
         int timeout = 5
     );
     
-    /**
+    /*
      * @brief 发送告警通知
      * @param alert 告警
      * @return 是否发送成功
      */
     bool SendAlert(const Alert& alert) override;
     
-    /**
+    /*
      * @brief 获取渠道名称
      * @return 渠道名称
      */
     std::string GetName() const override;
     
-    /**
+    /*
      * @brief 获取渠道类型
      * @return 渠道类型
      */
@@ -363,7 +363,7 @@ private:
     int timeout_;               ///< 超时时间
 };
 
-/**
+/*
  * @struct AlertManagerConfig
  * @brief 告警管理器配置
  */
@@ -378,74 +378,74 @@ struct AlertManagerConfig {
     std::chrono::seconds groupInterval{60};   ///< 告警分组间隔
 };
 
-/**
+/*
  * @class AlertManager
  * @brief 告警管理器，负责告警规则检查和通知发送
  */
 class AlertManager {
 public:
-    /**
+    /*
      * @brief 告警回调函数类型
      * @param alertId 告警ID
      * @param status 告警状态
      */
     using AlertCallback = std::function<void(const std::string&, AlertStatus)>;
     
-    /**
+    /*
      * @brief 构造函数
      * @param config 配置
      */
     explicit AlertManager(const AlertManagerConfig& config = AlertManagerConfig());
     
-    /**
+    /*
      * @brief 析构函数
      */
     ~AlertManager();
     
-    /**
+    /*
      * @brief 初始化告警管理器
      * @param config 配置
      * @return 是否成功初始化
      */
     bool Initialize(const AlertManagerConfig& config);
     
-    /**
+    /*
      * @brief 添加告警规则
      * @param rule 规则
      */
     void AddRule(std::shared_ptr<AlertRule> rule);
     
-    /**
+    /*
      * @brief 移除告警规则
      * @param ruleName 规则名称
      * @return 是否成功移除
      */
     bool RemoveRule(const std::string& ruleName);
     
-    /**
+    /*
      * @brief 清除所有规则
      */
     void ClearRules();
     
-    /**
+    /*
      * @brief 添加通知渠道
      * @param channel 通知渠道
      */
     void AddChannel(std::shared_ptr<NotificationChannel> channel);
     
-    /**
+    /*
      * @brief 移除通知渠道
      * @param channelName 渠道名称
      * @return 是否成功移除
      */
     bool RemoveChannel(const std::string& channelName);
     
-    /**
+    /*
      * @brief 清除所有通知渠道
      */
     void ClearChannels();
     
-    /**
+    /*
      * @brief 检查日志记录是否触发告警
      * @param record 日志记录
      * @param results 分析结果
@@ -455,14 +455,14 @@ public:
         const analyzer::LogRecord& record,
         const std::unordered_map<std::string, std::string>& results);
     
-    /**
+    /*
      * @brief 手动触发告警
      * @param alert 告警
      * @return 告警ID
      */
     std::string TriggerAlert(const Alert& alert);
     
-    /**
+    /*
      * @brief 解决告警
      * @param alertId 告警ID
      * @param comment 注释
@@ -470,7 +470,7 @@ public:
      */
     bool ResolveAlert(const std::string& alertId, const std::string& comment = "");
     
-    /**
+    /*
      * @brief 忽略告警
      * @param alertId 告警ID
      * @param comment 注释
@@ -478,20 +478,20 @@ public:
      */
     bool IgnoreAlert(const std::string& alertId, const std::string& comment = "");
     
-    /**
+    /*
      * @brief 获取告警信息
      * @param alertId 告警ID
      * @return 告警
      */
     Alert GetAlert(const std::string& alertId) const;
     
-    /**
+    /*
      * @brief 获取所有活跃告警
      * @return 活跃告警列表
      */
     std::vector<Alert> GetActiveAlerts() const;
     
-    /**
+    /*
      * @brief 获取告警历史
      * @param startTime 开始时间
      * @param endTime 结束时间
@@ -505,36 +505,36 @@ public:
         size_t limit = 100,
         size_t offset = 0) const;
     
-    /**
+    /*
      * @brief 设置告警回调
      * @param callback 回调函数
      */
     void SetAlertCallback(AlertCallback callback);
     
-    /**
+    /*
      * @brief 启动告警管理器
      * @return 是否成功启动
      */
     bool Start();
     
-    /**
+    /*
      * @brief 停止告警管理器
      */
     void Stop();
     
-    /**
+    /*
      * @brief 获取当前规则数量
      * @return 规则数量
      */
     size_t GetRuleCount() const;
     
-    /**
+    /*
      * @brief 获取当前通知渠道数量
      * @return 通知渠道数量
      */
     size_t GetChannelCount() const;
     
-    /**
+    /*
      * @brief 获取当前待处理告警数量
      * @return 待处理告警数量
      */

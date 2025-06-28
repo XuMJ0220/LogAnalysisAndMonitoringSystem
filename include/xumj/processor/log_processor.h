@@ -252,7 +252,7 @@ private:
     ProcessorMetrics metrics_;
     std::chrono::steady_clock::time_point lastMetricsFlush_;
     
-    /**
+    /*
      * @brief 工作线程函数，因为使用了线程池，所以把这个作废
      */
     // void WorkerThread();
@@ -302,13 +302,13 @@ private:
                       bool success);
 };
 
-/**
+/*
  * @brief 生成UUID
  * @return UUID字符串
  */
 std::string GenerateUUID();
 
-/**
+/*
  * @brief 时间戳转字符串
  * @param tp 时间点
  * @return 格式化的时间字符串
