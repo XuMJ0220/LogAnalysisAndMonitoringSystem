@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <zlib.h>
 #include <uuid/uuid.h>
+#include "xumj/network/tcp_server.h"
 
 namespace xumj {
 namespace processor {
@@ -46,151 +47,46 @@ bool JsonLogParser::Parse(const LogData& logData, analyzer::LogRecord& record) {
     record.timestamp = TimestampToString(logData.timestamp);
     record.source = logData.source;
     
-    // 检查元数据中是否已经有预处理的JSON字段
-    bool hasMetaTimestamp = logData.metadata.count("timestamp") > 0;
-    bool hasMetaLevel = logData.metadata.count("level") > 0;
-    bool hasMetaMessage = logData.metadata.count("message") > 0;
-    bool isJsonFormat = logData.metadata.count("is_json") > 0 && logData.metadata.at("is_json") == "true";
-    
-    // 尝试检测JSON格式（如果没有明确指定）
-    if (!isJsonFormat && logData.message.length() > 1 && 
-        logData.message[0] == '{' && logData.message[logData.message.length()-1] == '}') {
-        isJsonFormat = true;
-        if (config_.debug) {
-            std::cout << "  通过格式检测判断为JSON" << std::endl;
-        }
-    }
-    
-    if (hasMetaTimestamp) {
-        record.timestamp = logData.metadata.at("timestamp");
-        if (config_.debug) {
-        std::cout << "  使用元数据中的时间戳: " << record.timestamp << std::endl;
-        }
-    }
-    
-    if (hasMetaLevel) {
+    // 优先用metadata里的level
+    if (logData.metadata.count("level")) {
         record.level = logData.metadata.at("level");
-        if (config_.debug) {
-        std::cout << "  使用元数据中的级别: " << record.level << std::endl;
-        }
     }
     
-    // 获取日志内容
-    const std::string& content = logData.message;
+    // 检查是否为JSON格式
+    bool isJsonFormat = false;
+    if (logData.metadata.count("is_json") && logData.metadata.at("is_json") == "true") {
+        isJsonFormat = true;
+    } else if (logData.message.length() > 1 && logData.message[0] == '{' && logData.message.back() == '}') {
+        isJsonFormat = true;
+    }
     
-    try {
-        // 解析JSON
-        if (!isJsonFormat) {
-            if (config_.debug) {
-            std::cout << "  不是JSON格式，跳过解析" << std::endl;
-            }
+    if (isJsonFormat) {
+        try {
+            json j = json::parse(logData.message);
+            if (j.contains("timestamp") && j["timestamp"].is_string())
+                record.timestamp = j["timestamp"].get<std::string>();
+            if (j.contains("level") && j["level"].is_string())
+                record.level = j["level"].get<std::string>();
+            if (j.contains("message") && j["message"].is_string())
+                record.message = j["message"].get<std::string>();
+            if (j.contains("source") && j["source"].is_string())
+                record.source = j["source"].get<std::string>();
+            // 其他字段略
+            if (config_.debug) std::cout << "JsonLogParser: 解析成功(JSON)" << std::endl;
+            return true;
+        } catch (...) {
+            if (config_.debug) std::cout << "  JSON解析异常" << std::endl;
             return false;
         }
-        
-        if (config_.debug) {
-        std::cout << "  尝试解析JSON: " << (content.length() > 50 ? content.substr(0, 47) + "..." : content) << std::endl;
-        }
-        
-        json j = json::parse(content);
-        
-        if (config_.debug) {
-        std::cout << "  JSON解析成功" << std::endl;
-        }
-        
-        // 提取常见字段
-        if (j.contains("timestamp") && j["timestamp"].is_string() && !hasMetaTimestamp) {
-            record.timestamp = j["timestamp"].get<std::string>();
-            if (config_.debug) {
-            std::cout << "  从JSON中提取时间戳: " << record.timestamp << std::endl;
-            }
-        }
-        
-        if (j.contains("level") && j["level"].is_string() && !hasMetaLevel) {
-            record.level = j["level"].get<std::string>();
-            if (config_.debug) {
-            std::cout << "  从JSON中提取级别: " << record.level << std::endl;
-            }
-        }
-        
-        if (j.contains("message") && j["message"].is_string() && !hasMetaMessage) {
-            record.message = j["message"].get<std::string>();
-            if (config_.debug) {
-            std::cout << "  从JSON中提取消息: " << record.message << std::endl;
-            }
-        }
-        
-        if (j.contains("source") && j["source"].is_string() && record.source.empty()) {
-            record.source = j["source"].get<std::string>();
-            if (config_.debug) {
-            std::cout << "  从JSON中提取源: " << record.source << std::endl;
-            }
-        }
-        
-        // 确保基本字段存在
-        if (record.level.empty()) {
-            record.level = "INFO";  // 默认级别
-            if (config_.debug) {
-            std::cout << "  级别为空，设置默认级别: INFO" << std::endl;
-            }
-        }
-        
-        if (record.message.empty()) {
-            if (hasMetaMessage) {
-                record.message = logData.metadata.at("message");
-                if (config_.debug) {
-                std::cout << "  使用元数据中的消息: " << (record.message.length() > 50 ? record.message.substr(0, 47) + "..." : record.message) << std::endl;
-                }
-            } else {
-                // 如果消息为空，使用内容概要作为消息
-                record.message = "JSON日志: " + (content.size() > 50 ? content.substr(0, 50) + "..." : content);
-                if (config_.debug) {
-                std::cout << "  消息为空，使用内容概要: " << (record.message.length() > 50 ? record.message.substr(0, 47) + "..." : record.message) << std::endl;
-                }
-            }
-        }
-        
-        // 添加所有其他的JSON字段作为记录字段
-        for (auto it = j.begin(); it != j.end(); ++it) {
-            if (it.key() != "timestamp" && it.key() != "level" && 
-                it.key() != "message" && it.key() != "source") {
-                try {
-                    std::string fieldName = "json." + it.key();
-                    if (it.value().is_string()) {
-                        record.fields[fieldName] = it.value().get<std::string>();
-                        if (config_.debug) {
-                        std::cout << "  添加字段 " << fieldName << " = " << (record.fields[fieldName].length() > 30 ? record.fields[fieldName].substr(0, 27) + "..." : record.fields[fieldName]) << std::endl;
-                        }
-                    } else {
-                        record.fields[fieldName] = it.value().dump();
-                        if (config_.debug) {
-                        std::cout << "  添加非字符串字段 " << fieldName << " = " << (record.fields[fieldName].length() > 30 ? record.fields[fieldName].substr(0, 27) + "..." : record.fields[fieldName]) << std::endl;
-                        }
-                    }
-                } catch (...) {
-                    record.fields["json." + it.key()] = "无法转换的值类型";
-                    if (config_.debug) {
-                    std::cout << "  添加字段时出错 " << "json." + it.key() << " = 无法转换的值类型" << std::endl;
-                    }
-                }
-            }
-        }
-        
-        if (config_.debug) {
-        std::cout << "JsonLogParser: 解析成功" << std::endl;
-        }
+    } else {
+        // 普通文本日志，直接填充
+        record.message = logData.message;
+        if (record.level.empty() && logData.metadata.count("level"))
+            record.level = logData.metadata.at("level");
+        if (record.level.empty())
+            record.level = "INFO";
+        if (config_.debug) std::cout << "JsonLogParser: 兼容普通文本日志解析成功" << std::endl;
         return true;
-    } catch (const json::exception& e) {
-        // 处理JSON解析错误
-        if (config_.debug) {
-        std::cout << "  JSON解析异常: " << e.what() << std::endl;
-        }
-        return false;
-    } catch (const std::exception& e) {
-        // 处理其他解析错误
-        if (config_.debug) {
-        std::cout << "  解析异常: " << e.what() << std::endl;
-        }
-        return false;
     }
 }
 
@@ -366,6 +262,7 @@ bool LogProcessor::InitializeTcpServer() {
         
         // 设置消息回调
         tcpServer_->SetMessageCallback([this](uint64_t connectionId, const std::string& message, muduo::Timestamp) {
+            (void)connectionId;
             // 直接处理消息，无需查找连接
             std::cout << "接收到来自连接 " << connectionId << " 的消息" << std::endl;
             
@@ -974,3 +871,63 @@ void LogProcessor::ResetMetrics() {
 
 } // namespace processor
 } // namespace xumj 
+
+// ========== 新增：Processor服务端主函数 ==========
+// using namespace xumj::network;
+// using namespace xumj::processor;
+
+// int ProcessorServerMain() {
+//     // 配置LogProcessor
+//     LogProcessorConfig config;
+//     config.debug = true;
+//     config.workerThreads = 4;
+//     config.queueSize = 1000;
+//     config.tcpPort = 9001; // 监听9001端口
+//     config.enableRedisStorage = true;
+//     config.enableMySQLStorage = true;
+//     // ... 可补充更多配置 ...
+//     LogProcessor processor(config);
+//     // 添加解析器
+//     auto jsonParser = std::make_shared<JsonLogParser>();
+//     jsonParser->SetConfig(config);
+//     processor.AddLogParser(jsonParser);
+//     // 启动处理器
+//     if (!processor.Start()) {
+//         std::cerr << "LogProcessor启动失败" << std::endl;
+//         return 1;
+//     }
+//     // 启动TcpServer
+//     TcpServer server("ProcessorServer", "0.0.0.0", 9001, 4);
+//     server.SetMessageCallback([&processor](uint64_t connId, const std::string& msg, muduo::Timestamp){
+//         (void)connId;
+//         // 反序列化JSON数组
+//         auto logs = nlohmann::json::parse(msg, nullptr, false);
+//         if (!logs.is_array()) return;
+//         for (const auto& log : logs) {
+//             LogData data;
+//             data.id = log.value("id", GenerateUUID());
+//             data.message = log.value("content", "");
+//             data.source = log.value("source", "collector");
+//             // 解析时间
+//             std::string timeStr = log.value("time", "");
+//             std::tm tm = {};
+//             std::istringstream ss(timeStr);
+//             ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+//             if (!ss.fail()) {
+//                 data.timestamp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+//             } else {
+//                 data.timestamp = std::chrono::system_clock::now();
+//             }
+//             processor.SubmitLogData(data);
+//         }
+//     });
+//     server.Start();
+//     std::cout << "ProcessorServer已启动，监听9001端口..." << std::endl;
+//     while (true) std::this_thread::sleep_for(std::chrono::seconds(10));
+//     return 0;
+// }
+
+// main函数入口
+// int main() {
+//     return ProcessorServerMain();
+// } 

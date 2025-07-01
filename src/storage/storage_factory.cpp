@@ -79,6 +79,10 @@ MySQLConfig StorageFactory::CreateMySQLConfigFromJson(const std::string& configJ
         if (j.contains("poolSize") && j["poolSize"].is_number()) {
             config.poolSize = j["poolSize"].get<int>();
         }
+        
+        if (j.contains("table") && j["table"].is_string()) {
+            config.table = j["table"].get<std::string>();
+        }
     } catch (const std::exception& e) {
         std::cerr << "MySQL配置解析错误: " << e.what() << std::endl;
         // 使用默认配置

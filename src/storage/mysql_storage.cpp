@@ -296,7 +296,8 @@ std::shared_ptr<MySQLConnection> MySQLConnectionPool::CreateConnection() {
 // ---------- MySQLStorage 实现 ----------
 
 MySQLStorage::MySQLStorage(const MySQLConfig& config)
-    : pool_(std::make_unique<MySQLConnectionPool>(config)) {
+    : config_(config), pool_(std::make_unique<MySQLConnectionPool>(config)) {
+    std::cout << "MySQLStorage::config_.table = " << config_.table << std::endl;
 }
 
 MySQLStorage::~MySQLStorage() {
@@ -304,12 +305,13 @@ MySQLStorage::~MySQLStorage() {
 }
 
 bool MySQLStorage::Initialize() {
+    std::cout << "MySQLStorage::Initialize: config_.table = " << config_.table << std::endl;
     auto conn = pool_->GetConnection();
     
     try {
         // 创建日志表
         conn->Execute(
-            "CREATE TABLE IF NOT EXISTS log_entries ("
+            "CREATE TABLE IF NOT EXISTS " + config_.table + " ("
             "    id VARCHAR(36) PRIMARY KEY,"
             "    timestamp DATETIME NOT NULL,"
             "    level VARCHAR(20) NOT NULL,"
@@ -329,7 +331,7 @@ bool MySQLStorage::Initialize() {
             "    field_name VARCHAR(50) NOT NULL,"
             "    field_value TEXT NOT NULL,"
             "    PRIMARY KEY (log_id, field_name),"
-            "    FOREIGN KEY (log_id) REFERENCES log_entries(id) ON DELETE CASCADE,"
+            "    FOREIGN KEY (log_id) REFERENCES " + config_.table + "(id) ON DELETE CASCADE,"
             "    INDEX idx_field_name (field_name)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
         );
@@ -370,7 +372,7 @@ bool MySQLStorage::SaveLogEntry(const LogEntry& entry) {
             
             // 检查ID是否已存在
             std::stringstream check_sql;
-            check_sql << "SELECT COUNT(*) as count FROM log_entries WHERE id = '"
+            check_sql << "SELECT COUNT(*) as count FROM " + config_.table + " WHERE id = '"
                       << conn->EscapeString(id) << "'";
             
             auto result = conn->Query(check_sql.str());
@@ -434,7 +436,7 @@ bool MySQLStorage::SaveLogEntry(const LogEntry& entry) {
             }
             
             // 插入日志条目
-            std::string insert_sql = "INSERT INTO log_entries (id, timestamp, level, source, message) VALUES (?, ?, ?, ?, ?)";
+            std::string insert_sql = "INSERT INTO " + config_.table + " (id, timestamp, level, source, message) VALUES (?, ?, ?, ?, ?)";
             
             // 使用预处理语句
             MYSQL_STMT* stmt = mysql_stmt_init(conn->GetNativeHandle());
@@ -579,7 +581,7 @@ int MySQLStorage::SaveLogEntries(const std::vector<LogEntry>& entries) {
             
             // 插入日志条目
             std::stringstream sql;
-            sql << "INSERT INTO log_entries (id, timestamp, level, source, message) VALUES ("
+            sql << "INSERT INTO " + config_.table + " (id, timestamp, level, source, message) VALUES ("
                 << "'" << conn->EscapeString(id) << "', "
                 << "'" << conn->EscapeString(entry.timestamp) << "', "
                 << "'" << conn->EscapeString(entry.level) << "', "
@@ -628,7 +630,7 @@ std::vector<MySQLStorage::LogEntry> MySQLStorage::QueryLogEntries(
     try {
         // 构建查询SQL
         std::stringstream sql;
-        sql << "SELECT * FROM log_entries";
+        sql << "SELECT * FROM " + config_.table;
         
         // 添加WHERE子句
         std::string where_clause = BuildWhereClause(conditions);
@@ -669,7 +671,7 @@ MySQLStorage::LogEntry MySQLStorage::GetLogEntryById(const std::string& id) {
     try {
         // 查询日志条目
         std::stringstream sql;
-        sql << "SELECT * FROM log_entries WHERE id = '" << conn->EscapeString(id) << "'";
+        sql << "SELECT * FROM " + config_.table + " WHERE id = '" << conn->EscapeString(id) << "'";
         
         auto rows = conn->Query(sql.str());
         if (rows.empty()) {
@@ -735,7 +737,7 @@ std::vector<MySQLStorage::LogEntry> MySQLStorage::SearchLogEntriesByKeyword(
     try {
         // 构建搜索查询 - 使用LIKE代替MATCH AGAINST进行简单搜索
         std::stringstream sql;
-        sql << "SELECT * FROM log_entries WHERE message LIKE '%"
+        sql << "SELECT * FROM " + config_.table + " WHERE message LIKE '%"
             << conn->EscapeString(keyword) << "%'";
         
         // 添加ORDER BY子句
@@ -770,7 +772,7 @@ int MySQLStorage::GetLogEntryCount() {
     
     try {
         // 查询总数
-        auto rows = conn->Query("SELECT COUNT(*) AS count FROM log_entries");
+        auto rows = conn->Query("SELECT COUNT(*) AS count FROM " + config_.table);
         if (rows.empty()) {
             return 0;
         }
@@ -788,7 +790,7 @@ int MySQLStorage::DeleteLogEntriesBefore(const std::string& beforeTime) {
     try {
         // 删除指定时间之前的日志条目
         std::stringstream sql;
-        sql << "DELETE FROM log_entries WHERE timestamp < '" << conn->EscapeString(beforeTime) << "'";
+        sql << "DELETE FROM " + config_.table + " WHERE timestamp < '" << conn->EscapeString(beforeTime) << "'";
         
         return conn->Execute(sql.str());
     } catch (const MySQLStorageException& e) {

@@ -36,7 +36,7 @@ endif()
 
 # 添加包含目录
 target_include_directories(alert PRIVATE 
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CURL_INCLUDE_DIRS}
 )
 

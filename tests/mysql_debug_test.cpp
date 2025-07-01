@@ -68,8 +68,8 @@ int main() {
         // 测试日志表结构
         std::cout << "正在测试日志表结构..." << std::endl;
         try {
-            auto result = conn.Query("DESCRIBE log_entries");
-            std::cout << "log_entries 表结构: " << std::endl;
+            auto result = conn.Query("DESCRIBE processor_logs");
+            std::cout << "processor_logs 表结构: " << std::endl;
             for (const auto& row : result) {
                 std::cout << "- 字段: ";
                 for (const auto& field : row) {
@@ -106,7 +106,7 @@ int main() {
         std::cout << "正在尝试直接执行SQL插入..." << std::endl;
         bool directSuccess = false;
         try {
-            std::string sql = "INSERT INTO log_entries (id, timestamp, level, source, message) VALUES ('" 
+            std::string sql = "INSERT INTO processor_logs (id, timestamp, level, source, message) VALUES ('" 
                            + conn.EscapeString(id) + "', '" 
                            + conn.EscapeString(entry.timestamp) + "', '" 
                            + conn.EscapeString(entry.level) + "', '" 
@@ -124,7 +124,7 @@ int main() {
         // 删除刚插入的测试记录
         if (directSuccess) {
             try {
-                std::string sql = "DELETE FROM log_entries WHERE id = '" + conn.EscapeString(id) + "'";
+                std::string sql = "DELETE FROM processor_logs WHERE id = '" + conn.EscapeString(id) + "'";
                 conn.Execute(sql);
                 std::cout << "删除测试记录成功" << std::endl;
             } catch (const std::exception& e) {
@@ -147,7 +147,7 @@ int main() {
         // 验证日志条目是否保存成功
         std::cout << "正在验证日志条目是否保存成功..." << std::endl;
         try {
-            auto result = conn.Query("SELECT COUNT(*) as count FROM log_entries WHERE id = '" + conn.EscapeString(entry.id) + "'");
+            auto result = conn.Query("SELECT COUNT(*) as count FROM processor_logs WHERE id = '" + conn.EscapeString(entry.id) + "'");
             if (!result.empty()) {
                 auto& row = result[0];
                 if (row.find("count") != row.end()) {

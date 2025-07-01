@@ -1,5 +1,5 @@
 -- 创建数据库（如果不存在）
-CREATE DATABASE IF NOT EXISTS logdb;
+CREATE DATABASE IF NOT EXISTS logdb DEFAULT CHARACTER SET utf8mb4;
 
 -- 使用数据库
 USE logdb;
@@ -150,4 +150,17 @@ CREATE INDEX idx_logs_level ON logs(level);
 CREATE INDEX idx_alerts_timestamp ON alerts(timestamp);
 CREATE INDEX idx_alerts_level ON alerts(level);
 CREATE INDEX idx_alerts_status ON alerts(status);
-CREATE INDEX idx_alerts_source ON alerts(source); 
+CREATE INDEX idx_alerts_source ON alerts(source);
+
+-- 删除旧的processor_logs表（如存在）
+DROP TABLE IF EXISTS processor_logs;
+
+-- 创建新的processor_logs表
+CREATE TABLE IF NOT EXISTS processor_logs (
+    id VARCHAR(64) PRIMARY KEY,
+    timestamp VARCHAR(32),
+    level VARCHAR(16),
+    source VARCHAR(128),
+    message TEXT,
+    fields JSON
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4; 

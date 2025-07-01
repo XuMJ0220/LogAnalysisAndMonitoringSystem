@@ -11,7 +11,7 @@ target_compile_options(network PUBLIC ${COMPILE_OPTIONS})
 
 # 添加包含目录
 target_include_directories(network PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # 设置库依赖

@@ -100,10 +100,8 @@ include_directories(
     ${ZLIB_INCLUDE_DIRS}
 )
 
+# 只递归包含src目录
 add_subdirectory(src)
-# add_subdirectory(examples)
-# add_subdirectory(tests)
-# add_subdirectory(tools)
 
 # 自动检测Qt5或Qt6
 find_package(Qt5 COMPONENTS Widgets Network REQUIRED)
@@ -135,4 +133,5 @@ if(TARGET DistributedLogMonitorClient)
     target_include_directories(DistributedLogMonitorClient PRIVATE ${Qt5Widgets_INCLUDE_DIRS} ${Qt5Network_INCLUDE_DIRS})
 endif()
 
-add_subdirectory(src/collector) 
+# add_subdirectory(src/processor)
+# add_subdirectory(src/collector) 

@@ -5,7 +5,7 @@ find_package(Protobuf REQUIRED)
 find_package(gRPC REQUIRED)
 
 # 使用预先生成的Proto文件
-set(PROTO_GEN_DIR "${CMAKE_BINARY_DIR}/proto_gen")
+set(PROTO_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/proto_gen")
 
 # 设置Proto源文件列表
 set(PROTO_SRCS
@@ -53,7 +53,7 @@ target_compile_options(grpc_server PRIVATE -Wall -Wextra)
 
 # 添加包含目录
 target_include_directories(grpc_server PRIVATE
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${PROTO_GEN_DIR}
     ${PROTOBUF_INCLUDE_DIRS}
     ${GRPC_INCLUDE_DIRS}

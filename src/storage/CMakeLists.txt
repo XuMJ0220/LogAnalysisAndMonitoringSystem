@@ -19,7 +19,7 @@ target_compile_options(storage PRIVATE
 )
 
 target_include_directories(storage PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # 查找nlohmann/json库

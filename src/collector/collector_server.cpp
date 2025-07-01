@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <iostream>
+#include <xumj/network/tcp_client.h>
 
 using json = nlohmann::json;
 using namespace xumj::network;
@@ -15,17 +16,37 @@ std::unordered_map<uint64_t, std::unique_ptr<LogCollector>> collectors;
 std::mutex collectorsMutex;
 TcpServer* g_server = nullptr; // 用于回调中推送日志
 
+// 新增：全局TcpClient指针，指向processor
+std::unique_ptr<TcpClient> g_processorClient;
+std::mutex g_processorClientMutex;
+
 // 日志推送回调
-void PushLogToClient(uint64_t connId, const std::vector<LogEntry>& entries) {
-    json arr = json::array();
+void PushLogToClientAndProcessor(uint64_t connId, const std::vector<LogEntry>& entries) {
+    // 推送给QT客户端（原格式）
+    json arr_qt = json::array();
     for (const auto& entry : entries) {
-        arr.push_back({
+        arr_qt.push_back({
             {"time", TimestampToString(entry.GetTimestamp())},
             {"level", LogLevelToString(entry.GetLevel())},
             {"content", entry.GetContent()}
         });
     }
-    if (g_server && !arr.empty()) g_server->Send(connId, arr.dump() + "\n");
+    if (g_server && !arr_qt.empty()) g_server->Send(connId, arr_qt.dump() + "\n");
+
+    // 推送给processor_server（processor期望格式）
+    std::lock_guard<std::mutex> lock(g_processorClientMutex);
+    if (g_processorClient && g_processorClient->IsConnected() && !entries.empty()) {
+        json arr_proc = json::array();
+        for (const auto& entry : entries) {
+            arr_proc.push_back({
+                {"timestamp", TimestampToString(entry.GetTimestamp())},
+                {"level", LogLevelToString(entry.GetLevel())},
+                {"message", entry.GetContent()},
+                {"source", "collector"}
+            });
+        }
+        g_processorClient->Send(arr_proc.dump() + "\n");
+    }
 }
 
 void OnMessage(uint64_t connId, const std::string& msg, muduo::Timestamp) {
@@ -61,13 +82,13 @@ void OnMessage(uint64_t connId, const std::string& msg, muduo::Timestamp) {
         if (!keywords.empty()) {
             collector->AddFilter(std::make_shared<KeywordFilter>(keywords));
         }
-        // 设置推送回调
-        collector->SetSendCallback([connId](size_t){ /* 可选统计 */ });
+        // 设置推送回调（同时推送给QT和processor）
+        collector->SetSendCallback([connId](size_t){ /* 统计可选 */ });
         collector->CollectFromFile(file, level, interval, maxLines);
         std::lock_guard<std::mutex> lock(collectorsMutex);
         collectors[connId] = std::move(collector);
         // 在OnMessage中，启动采集前动态设置connId
-        RegisterLogPushCallback(PushLogToClient, connId);
+        RegisterLogPushCallback(PushLogToClientAndProcessor, connId);
     } else if (j["cmd"] == "stop") {
         std::lock_guard<std::mutex> lock(collectorsMutex);
         if (collectors.count(connId)) {
@@ -88,8 +109,11 @@ void OnConnection(uint64_t connId, const std::string&, bool connected) {
 }
 
 int main() {
+    // 新增：初始化TcpClient，连接到processor（假设127.0.0.1:9001）
+    g_processorClient = std::make_unique<TcpClient>("CollectorToProcessor", "127.0.0.1", 9001);
+    g_processorClient->Connect();
     // 注册日志推送回调
-    xumj::collector::RegisterLogPushCallback(PushLogToClient, 0); // connId后续在OnMessage中动态设置
+    xumj::collector::RegisterLogPushCallback(PushLogToClientAndProcessor, 0); // connId后续在OnMessage中动态设置
     TcpServer server("CollectorServer", "127.0.0.1", 9000, 4);
     g_server = &server;
     server.SetMessageCallback(OnMessage);

@@ -36,7 +36,7 @@ endif()
 
 # 添加包含目录
 target_include_directories(processor PRIVATE 
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # 链接依赖库
@@ -54,5 +54,24 @@ target_link_libraries(processor
 install(TARGETS processor
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+
+# 添加processor_server可执行文件
+message(STATUS "正在添加processor_server目标")
+add_executable(processor_server processor_server.cpp)
+message(STATUS "已添加processor_server目标")
+target_link_libraries(processor_server
+    processor
+    common
+    storage
+    network
+    analyzer
+    nlohmann_json::nlohmann_json
+    ${ZLIB_LIBRARIES}
+    ${UUID_LIBRARY}
+    pthread
+)
+install(TARGETS processor_server
     RUNTIME DESTINATION bin
 ) 

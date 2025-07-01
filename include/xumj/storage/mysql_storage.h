@@ -34,6 +34,7 @@ struct MySQLConfig {
     std::string database{};        // MySQL数据库名
     int timeout{5};                // 连接超时（秒）
     int poolSize{5};               // 连接池大小
+    std::string table{"log_entries"}; // 新增，默认log_entries
 };
 
 /*
@@ -333,6 +334,7 @@ public:
     bool TestConnection();
     
 private:
+    MySQLConfig config_;
     std::unique_ptr<MySQLConnectionPool> pool_;  // MySQL连接池
     
     /*

@@ -27,7 +27,7 @@ endif()
 
 # 添加包含目录
 target_include_directories(analyzer PRIVATE 
-    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # 链接依赖库
