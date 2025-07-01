@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 #include "xumj/common/memory_pool.h"
 #include "xumj/common/lock_free_queue.h"
 #include "xumj/common/thread_pool.h"
@@ -198,8 +199,10 @@ struct CollectorConfig {
     size_t maxQueueSize{10000};               // 最大队列大小
     size_t threadPoolSize{2};                 // 工作线程数量
     size_t memoryPoolSize{1024};              // 内存池大小
-    LogLevel minLevel{LogLevel::INFO};        // 最低收集的日志级别
-    bool compressLogs{true};                  // 是否压缩日志
+    LogLevel minLevel{LogLevel::INFO};        // 最低采集日志级别
+    int clean_interval_sec{3};                // 日志清理周期，单位秒，默认3秒
+    bool enable_backup{true};                 // 是否备份已消费内容，默认开启
+    bool compressLogs{false};                  // 是否压缩日志，默认关闭
     bool enableRetry{true};                   // 是否启用重试机制
     uint32_t maxRetryCount{3};                // 最大重试次数
     std::chrono::milliseconds retryInterval{5000}; // 重试间隔
@@ -292,6 +295,9 @@ public:
      */
     void SetErrorCallback(std::function<void(const std::string&)> callback);
     
+    // 新增：从文件采集日志
+    bool CollectFromFile(const std::string& filePath, LogLevel level = LogLevel::INFO, size_t intervalMs = 1000, int maxLinesPerRound = 10);
+    
 private:
     CollectorConfig config_;                                     // 收集器配置
     std::atomic<bool> isActive_;                                // 收集器是否活动
@@ -303,6 +309,8 @@ private:
     std::thread flushThread_;                                   // 定时刷新线程
     std::function<void(size_t)> sendCallback_;                   // 发送成功回调
     std::function<void(const std::string&)> errorCallback_;       // 错误回调
+    std::mutex fileCleanMutex_;
+    std::streampos lastCleanPos_ = 0;
     
     /*
      * @brief 发送日志批次
@@ -335,7 +343,16 @@ private:
      * @return 压缩后的日志内容
      */
     std::string CompressLogContent(const std::string& content);
+    
+    void StartCleanThread(const std::string& filePath);
+    void CleanAndBackup(const std::string& filePath);
 };
+
+std::string LogLevelToString(LogLevel level);
+std::string TimestampToString(const std::chrono::system_clock::time_point& timestamp);
+
+using LogPushCallback = void(*)(uint64_t, const std::vector<LogEntry>&);
+void RegisterLogPushCallback(LogPushCallback cb, uint64_t connId);
 
 } // namespace collector
 } // namespace xumj

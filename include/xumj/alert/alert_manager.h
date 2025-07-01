@@ -30,7 +30,7 @@ enum class AlertLevel {
     CRITICAL   // 严重
 };
 
-/**
+/*
  * @enum AlertStatus
  * @brief 告警状态枚举
  */
@@ -158,12 +158,12 @@ public:
     std::string GetDescription() const override;
     
 private:
-    std::string name_;          ///< 规则名称
-    std::string description_;   ///< 规则描述
-    std::string field_;         ///< 检查的字段
-    double threshold_;          ///< 阈值
-    std::string compareType_;   ///< 比较类型
-    AlertLevel level_;          ///< 告警级别
+    std::string name_;          // 规则名称
+    std::string description_;   // 规则描述
+    std::string field_;         // 检查的字段
+    double threshold_;          // 阈值
+    std::string compareType_;   // 比较类型
+    AlertLevel level_;          // 告警级别
 };
 
 /*
@@ -223,12 +223,12 @@ public:
     std::string GetDescription() const override;
     
 private:
-    std::string name_;          ///< 规则名称
-    std::string description_;   ///< 规则描述
-    std::string field_;         ///< 检查的字段
-    std::vector<std::string> keywords_;  ///< 关键字列表
-    bool matchAll_;             ///< 是否匹配所有关键字
-    AlertLevel level_;          ///< 告警级别
+    std::string name_;          // 规则名称
+    std::string description_;   // 规则描述
+    std::string field_;         // 检查的字段
+    std::vector<std::string> keywords_;  // 关键字列表
+    bool matchAll_;             // 是否匹配所有关键字
+    AlertLevel level_;          // 告警级别
 };
 
 /*
@@ -236,6 +236,7 @@ private:
  * @brief 通知渠道接口
  */
 class NotificationChannel {
+
 public:
     virtual ~NotificationChannel() = default;
     
@@ -307,14 +308,14 @@ public:
     std::string GetType() const override;
     
 private:
-    std::string name_;          ///< 渠道名称
-    std::string smtpServer_;    ///< SMTP服务器
-    int smtpPort_;              ///< SMTP端口
-    std::string username_;      ///< 用户名
-    std::string password_;      ///< 密码
-    std::string from_;          ///< 发件人
-    std::vector<std::string> to_;  ///< 收件人列表
-    bool useTLS_;               ///< 是否使用TLS
+    std::string name_;          // 渠道名称
+    std::string smtpServer_;    // SMTP服务器
+    int smtpPort_;              // SMTP端口
+    std::string username_;      // 用户名
+    std::string password_;      // 密码
+    std::string from_;          // 发件人
+    std::vector<std::string> to_;  // 收件人列表
+    bool useTLS_;               // 是否使用TLS
 };
 
 /*

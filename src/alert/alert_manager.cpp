@@ -337,6 +337,7 @@ Alert KeywordAlertRule::GenerateAlert(
     return alert;
 }
 
+
 std::string KeywordAlertRule::GetName() const {
     return name_;
 }

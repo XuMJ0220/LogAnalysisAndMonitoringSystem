@@ -1,5 +1,6 @@
-cmake_minimum_required(VERSION 3.10)
-project(LogAnalysisSystem VERSION 1.0)
+cmake_minimum_required(VERSION 3.14)
+project(DistributedLogMonitorClient)
+set(CMAKE_AUTOMOC ON)
 
 # 设置C++标准为C++17
 set(CMAKE_CXX_STANDARD 17)
@@ -13,7 +14,7 @@ set(COMPILE_OPTIONS
     -O2
 )
 
-# 设置输出目录
+# 输出目录全部基于CMAKE_BINARY_DIR（即build目录）
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -99,14 +100,39 @@ include_directories(
     ${ZLIB_INCLUDE_DIRS}
 )
 
-# 添加子目录
 add_subdirectory(src)
-add_subdirectory(examples)
-add_subdirectory(tests)
-add_subdirectory(tools)  # 添加tools目录
+# add_subdirectory(examples)
+# add_subdirectory(tests)
+# add_subdirectory(tools)
 
-# 安装规则
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-    DESTINATION include/log_analysis_system
-    FILES_MATCHING PATTERN "*.h"
-) 
+# 自动检测Qt5或Qt6
+find_package(Qt5 COMPONENTS Widgets Network REQUIRED)
+# 如果需要支持Qt6，可加如下行：
+# find_package(Qt6 COMPONENTS Widgets Network REQUIRED)
+
+# qt5_wrap_cpp(MOC_SOURCES views/DraggableTableView.h)  # 已不再需要，AUTOMOC自动处理
+
+add_executable(DistributedLogMonitorClient
+    main.cpp
+    MainWindow.cpp MainWindow.h
+    ApiClient.cpp ApiClient.h
+    models/LogModel.cpp models/LogModel.h
+    models/AlertModel.cpp models/AlertModel.h
+    models/RuleModel.cpp models/RuleModel.h
+    models/MonitorModel.cpp models/MonitorModel.h
+    views/LogView.cpp views/LogView.h
+    views/DraggableTableView.cpp views/DraggableTableView.h
+    views/AlertView.cpp views/AlertView.h
+    views/RuleView.cpp views/RuleView.h
+    views/MonitorView.cpp views/MonitorView.h
+    views/CollectorView.cpp views/CollectorView.h
+    views/CollectorLogModel.cpp views/CollectorLogModel.h
+)
+
+# 确保Qt头文件和库被包含和链接
+if(TARGET DistributedLogMonitorClient)
+    target_link_libraries(DistributedLogMonitorClient PRIVATE Qt5::Widgets Qt5::Network)
+    target_include_directories(DistributedLogMonitorClient PRIVATE ${Qt5Widgets_INCLUDE_DIRS} ${Qt5Network_INCLUDE_DIRS})
+endif()
+
+add_subdirectory(src/collector) 

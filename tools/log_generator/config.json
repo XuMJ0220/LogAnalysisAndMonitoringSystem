@@ -1,0 +1,31 @@
+{
+
+  "logs_per_second": 15,
+
+ 
+  "total_logs": 1500
+  ,
+
+
+  "duration_seconds": 0,
+
+
+  "output_file": "../../../logs/test_service.log",
+
+
+  "level_distribution": {"info": 70, "warn": 20, "error": 10},
+
+  "modules": ["user", "order", "payment", "system"],
+
+
+  "locale": "en",
+
+
+  "log_format": "{time} [{level}] {module}: {msg}",
+
+
+  "console_output": false,
+
+
+  "fields": ["name", "phone", "company", "ip", "action", "sentence"]
+}

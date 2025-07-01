@@ -7,6 +7,8 @@
 #include <zlib.h>
 #include <optional>
 #include <memory>
+#include <fstream>
+#include <thread>
 
 namespace xumj {
 namespace collector {
@@ -55,6 +57,11 @@ std::string CompressString(const std::string& data) {
     // 返回压缩后的数据
     return std::string(reinterpret_cast<char*>(buffer.data()), compressedSize);
 }
+
+// 声明外部推送回调（由collector_server.cpp实现并注册）
+LogPushCallback g_logPushCallback = nullptr;
+uint64_t g_logPushConnId = 0;
+void RegisterLogPushCallback(LogPushCallback cb, uint64_t connId) { g_logPushCallback = cb; g_logPushConnId = connId; }
 
 LogCollector::LogCollector() : isActive_(false) {
     // 默认构造函数，需要后续调用Initialize进行初始化
@@ -209,26 +216,17 @@ void LogCollector::SetErrorCallback(std::function<void(const std::string&)> call
 }
 
 bool LogCollector::SendLogBatch(std::vector<LogEntry>& logs) {
-    // 实际实现中，这里会通过网络发送日志到服务器
-    // 在此示例中，我们只是简单地打印日志
-    
     try {
         size_t log_size = logs.size();
+        if (g_logPushCallback) g_logPushCallback(g_logPushConnId, logs);
         for (auto it = logs.begin(); it != logs.end();) {
-            // std::cout << "[" << TimestampToString(it->GetTimestamp()) << "] "
-            //           << "[" << LogLevelToString(it->GetLevel()) << "] "
-            //           << it->GetContent() << std::endl;
-            it = logs.erase(it); // 删除当前元素并更新迭代器
+            it = logs.erase(it);
         }
-        
-        // 调用成功回调
         if (sendCallback_) {
             sendCallback_(log_size -  logs.size());
         }
-        
         return true;
     } catch (const std::exception& e) {
-        // 发生错误
         if (errorCallback_) {
             errorCallback_(std::string("Failed to send logs: ") + e.what());
         }
@@ -287,6 +285,120 @@ void LogCollector::HandleRetry(const std::vector<LogEntry>& logs) {
 
 std::string LogCollector::CompressLogContent(const std::string& content) {
     return CompressString(content);
+}
+
+bool LogCollector::CollectFromFile(const std::string& filePath, LogLevel level, size_t intervalMs, int maxLinesPerRound) {
+    // 启动一个线程定时读取文件内容
+    std::thread([this, filePath, level, intervalMs, maxLinesPerRound]() {
+        std::ifstream file(filePath, std::ios::in);
+        if (!file.is_open()) {
+            if (errorCallback_) errorCallback_("无法打开日志文件: " + filePath);
+            return;
+        }
+        // 启动时从头读取
+        file.seekg(0, std::ios::beg);
+        std::streampos lastPos = file.tellg();
+        if (lastPos == -1) lastPos = 0;
+        lastCleanPos_ = lastPos;
+        StartCleanThread(filePath); // 启动定时清理线程（可选，保留备份功能）
+        while (isActive_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
+            file.clear(); // 清除eof标志
+            file.seekg(0, std::ios::end);
+            std::streampos endPos = file.tellg();
+            bool hasNewLog = (endPos > lastPos);
+            std::cout << "[DEBUG] 循环: lastPos=" << lastPos << ", endPos=" << endPos << ", hasNewLog=" << hasNewLog << std::endl;
+            if (endPos > lastPos) {
+                file.seekg(lastPos);
+                std::string line;
+                int linesCollected = 0;
+                std::streampos lastReadPos = lastPos;
+                while (std::getline(file, line)) {
+                    if (!line.empty()) {
+                        SubmitLog(line, level);
+                        linesCollected++;
+                    }
+                    // 每采集一条就更新lastReadPos
+                    std::streampos curPos = file.tellg();
+                    if (curPos != -1) {
+                        lastReadPos = curPos;
+                    } else {
+                        lastReadPos += static_cast<std::streampos>(line.size() + 1); // +1 for '\n'
+                    }
+                    if (linesCollected >= maxLinesPerRound) {
+                        std::cout << "[DEBUG] 达到本轮采集上限: " << maxLinesPerRound << " 条，提前结束本轮采集。" << std::endl;
+                        break;
+                    }
+                }
+                std::cout << "[DEBUG] 采集后 lastReadPos=" << lastReadPos << ", 本轮采集条数=" << linesCollected << std::endl;
+                // 采集完新内容后立即清理已采集内容
+                if (hasNewLog && lastReadPos > lastPos && linesCollected > 0) {
+                    std::cout << "[DEBUG] 采集到新内容，准备清理已采集内容，lastPos=" << lastPos << ", lastReadPos=" << lastReadPos << std::endl;
+                    file.close();
+                    // 读取未采集内容
+                    std::ifstream in(filePath, std::ios::binary);
+                    in.seekg(lastReadPos);
+                    std::vector<char> remain((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    std::cout << "[DEBUG] 未采集内容字节数: " << remain.size() << std::endl;
+                    in.close();
+                    // 清空并写回未采集内容
+                    std::ofstream out(filePath, std::ios::binary | std::ios::trunc);
+                    if (!remain.empty()) out.write(remain.data(), remain.size());
+                    out.close();
+                    std::cout << "[DEBUG] 清理后已写回未采集内容，重新打开文件继续采集。" << std::endl;
+                    // 检查清理后文件大小
+                    std::ifstream check(filePath, std::ios::binary | std::ios::ate);
+                    std::cout << "[DEBUG] 清理后文件大小: " << check.tellg() << std::endl;
+                    check.close();
+                    // 重新打开文件以继续采集
+                    file.open(filePath, std::ios::in);
+                    lastPos = 0;
+                } else {
+                    lastPos = lastReadPos;
+                }
+            }
+        }
+    }).detach();
+    return true;
+}
+
+void LogCollector::StartCleanThread(const std::string& filePath) {
+    std::thread([this, filePath]() {
+        while (isActive_) {
+            std::this_thread::sleep_for(std::chrono::seconds(config_.clean_interval_sec));
+            CleanAndBackup(filePath);
+        }
+    }).detach();
+}
+
+void LogCollector::CleanAndBackup(const std::string& filePath) {
+    std::lock_guard<std::mutex> lock(fileCleanMutex_);
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file.is_open()) return;
+    if (lastCleanPos_ <= 0) return;
+    // 读取已消费内容
+    std::vector<char> consumed(static_cast<size_t>(lastCleanPos_));
+    file.read(consumed.data(), lastCleanPos_);
+    // 读取未消费内容
+    file.seekg(lastCleanPos_);
+    std::vector<char> remain((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+    // 备份
+    if (config_.enable_backup && !consumed.empty()) {
+        auto t = std::time(nullptr);
+        char buf[64];
+        std::strftime(buf, sizeof(buf), ".bak.%Y%m%d_%H%M%S", std::localtime(&t));
+        std::string backupFile = filePath + buf;
+        std::ofstream bak(backupFile, std::ios::out | std::ios::binary);
+        bak.write(consumed.data(), consumed.size());
+        bak.close();
+    }
+    // 清理（重写未消费内容）
+    std::ofstream out(filePath, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!remain.empty()) out.write(remain.data(), remain.size());
+    out.close();
+    // 更新lastCleanPos_
+    lastCleanPos_ = 0;
 }
 
 } // namespace collector
